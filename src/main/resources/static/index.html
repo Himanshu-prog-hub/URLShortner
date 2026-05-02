@@ -1,0 +1,915 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Snip — URL Shortener</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg:          #070b12;
+    --surface:     #0d1523;
+    --surface2:    #121d30;
+    --surface3:    #18243a;
+    --border:      #1c2c44;
+    --border2:     #243447;
+    --accent:      #0ea5e9;
+    --accent2:     #38bdf8;
+    --accent-dim:  rgba(14,165,233,0.12);
+    --accent-glow: rgba(14,165,233,0.25);
+    --text:        #dde5f0;
+    --text2:       #7a90b0;
+    --text3:       #3d5270;
+    --green:       #10d9a0;
+    --red:         #f05d6a;
+    --yellow:      #f0c040;
+    --font:        'Space Grotesk', sans-serif;
+    --mono:        'JetBrains Mono', monospace;
+  }
+  html, body { height: 100%; }
+  body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: radial-gradient(circle, #1c2c44 1px, transparent 1px);
+    background-size: 28px 28px;
+    opacity: 0.35;
+    pointer-events: none;
+    z-index: 0;
+  }
+  #root { position: relative; z-index: 1; min-height: 100vh; }
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(16px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes barGrow {
+    from { transform: scaleY(0); }
+    to   { transform: scaleY(1); }
+  }
+  .fade-up   { animation: fadeUp 0.4s ease both; }
+  .fade-up-2 { animation: fadeUp 0.4s 0.08s ease both; }
+  .fade-up-3 { animation: fadeUp 0.4s 0.16s ease both; }
+  .fade-up-4 { animation: fadeUp 0.4s 0.24s ease both; }
+  button { cursor: pointer; font-family: var(--font); border: none; outline: none; }
+  input  { font-family: var(--font); outline: none; }
+  .mono  { font-family: var(--mono); }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+/* ─── API helpers ─────────────────────────────────────────────── */
+const API = {
+  async shorten(longUrl) {
+    const r = await fetch('/shorten', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ longUrl }),
+    });
+    if (!r.ok) { const e = await r.json(); throw new Error(e.message || 'Failed'); }
+    return r.json();
+  },
+  async stats(code) {
+    const r = await fetch(`/stats/${encodeURIComponent(code)}`);
+    if (!r.ok) throw new Error('Not found');
+    return r.json();
+  },
+  async expandShortUrl(value) {
+    return this.stats(extractShortCode(value));
+  },
+  async del(code) {
+    const r = await fetch(`/shorten/${code}`, { method: 'DELETE' });
+    if (!r.ok) throw new Error('Delete failed');
+  },
+  async fetchAll() {
+    const r = await fetch('/links');
+    if (!r.ok) throw new Error('Failed to load links');
+    return r.json(); // List<StatsResponse>
+  },
+};
+
+/* ─── Mock analytics (backend tracks clicks only in Layer 1) ─── */
+const mockAnalytics = (n) => ({
+  refs: [
+    { source: 'Twitter / X', pct: 34, count: Math.round(n * 0.34) },
+    { source: 'Direct',      pct: 28, count: Math.round(n * 0.28) },
+    { source: 'LinkedIn',    pct: 18, count: Math.round(n * 0.18) },
+    { source: 'Google',      pct: 12, count: Math.round(n * 0.12) },
+    { source: 'Other',       pct:  8, count: Math.round(n * 0.08) },
+  ],
+  geo: [
+    { country: 'United States', pct: 42, flag: '\u{1F1FA}\u{1F1F8}' },
+    { country: 'United Kingdom', pct: 18, flag: '\u{1F1EC}\u{1F1E7}' },
+    { country: 'Germany',        pct: 12, flag: '\u{1F1E9}\u{1F1EA}' },
+    { country: 'Canada',         pct:  9, flag: '\u{1F1E8}\u{1F1E6}' },
+    { country: 'Australia',      pct:  7, flag: '\u{1F1E6}\u{1F1FA}' },
+    { country: 'Other',          pct: 12, flag: '\u{1F30D}' },
+  ],
+  daily: Array.from({ length: 14 }, () =>
+    Math.max(1, Math.round(n / 14 * (0.4 + Math.random() * 1.2)))
+  ),
+});
+
+const extractShortCode = (value) => {
+  const trimmed = value.trim();
+  if (!trimmed) throw new Error('Enter a short URL or code');
+  try {
+    const parsed = new URL(trimmed);
+    const code = parsed.pathname.split('/').filter(Boolean).pop();
+    if (code) return code;
+  } catch {}
+  const clean = trimmed.replace(/^\/+|\/+$/g, '');
+  return clean.split('/').filter(Boolean).pop() || clean;
+};
+
+const enrichLink = (data) => ({
+  ...data,
+  clickCount: data.clickCount || 0,
+  daily: Array(14).fill(0),
+  ...mockAnalytics(data.clickCount || 0),
+});
+
+const upsertLink = (items, link) => [
+  link,
+  ...items.filter(item => item.shortCode !== link.shortCode),
+];
+
+/* ─── Icons ─────────────────────────────────────────────────────── */
+const Icon = ({ d, size = 16, stroke = 'currentColor', fill = 'none', sw = 1.6 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill={fill}
+    stroke={stroke} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round">
+    {Array.isArray(d) ? d.map((p, i) => <path key={i} d={p}/>) : <path d={d}/>}
+  </svg>
+);
+const CopyIcon   = p => <Icon {...p} d="M8 4H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-2M8 4a2 2 0 012-2h4a2 2 0 012 2M8 4h8"/>;
+const CheckIcon  = p => <Icon {...p} d="M20 6L9 17l-5-5"/>;
+const LinkIcon   = p => <Icon {...p} d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/>;
+const ChartIcon  = p => <Icon {...p} d="M18 20V10M12 20V4M6 20v-6"/>;
+const GridIcon   = p => <Icon {...p} d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z"/>;
+const LogoutIcon = p => <Icon {...p} d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/>;
+const PlusIcon   = p => <Icon {...p} d="M12 5v14M5 12h14"/>;
+const ArrowIcon  = p => <Icon {...p} d="M5 12h14M12 5l7 7-7 7"/>;
+const TrashIcon  = p => <Icon {...p} d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/>;
+const GlobeIcon  = p => <Icon {...p} d="M12 2a10 10 0 100 20A10 10 0 0012 2zM2 12h20M12 2a15.3 15.3 0 010 20M12 2a15.3 15.3 0 000 20"/>;
+const ZapIcon    = p => <Icon {...p} d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" fill="currentColor" stroke="none"/>;
+const BackIcon     = p => <Icon {...p} d="M19 12H5M12 19l-7-7 7-7"/>;
+const SearchIcon   = p => <Icon {...p} d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z"/>;
+const ExternalIcon = p => <Icon {...p} d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3"/>;
+
+/* ─── Chip ──────────────────────────────────────────────────────── */
+const Chip = ({ children, color = 'accent' }) => {
+  const map = {
+    accent: { bg:'rgba(14,165,233,0.1)', text:'#38bdf8', border:'rgba(14,165,233,0.25)' },
+    green:  { bg:'rgba(16,217,160,0.1)', text:'#10d9a0', border:'rgba(16,217,160,0.25)' },
+  };
+  const c = map[color];
+  return (
+    <span style={{ display:'inline-flex', alignItems:'center', gap:4, padding:'2px 8px',
+      borderRadius:99, fontSize:11, fontWeight:600, letterSpacing:'0.03em',
+      background:c.bg, color:c.text, border:`1px solid ${c.border}` }}>
+      {children}
+    </span>
+  );
+};
+
+/* ─── Stat ──────────────────────────────────────────────────────── */
+const Stat = ({ label, value, sub, delay = '0s' }) => (
+  <div className="fade-up" style={{ animationDelay: delay }}>
+    <div style={{ fontSize:32, fontWeight:700, color:'var(--text)', letterSpacing:'-0.02em' }}>{value}</div>
+    <div style={{ fontSize:13, color:'var(--text2)', marginTop:2 }}>{label}</div>
+    {sub && <div style={{ fontSize:11, color:'var(--accent)', marginTop:2 }}>{sub}</div>}
+  </div>
+);
+
+/* ─── MiniChart ─────────────────────────────────────────────────── */
+const MiniChart = ({ data, height = 48 }) => {
+  const max = Math.max(...data, 1);
+  return (
+    <div style={{ display:'flex', alignItems:'flex-end', gap:2, height }}>
+      {data.map((v, i) => (
+        <div key={i} style={{
+          flex:1, borderRadius:'2px 2px 0 0',
+          background: i === data.length-1 ? 'var(--accent)' : 'rgba(14,165,233,0.25)',
+          height:`${v/max*100}%`, transformOrigin:'bottom',
+          animation:`barGrow 0.6s ${i*0.03}s cubic-bezier(.16,1,.3,1) both`,
+        }}/>
+      ))}
+    </div>
+  );
+};
+
+/* ─── FullChart ─────────────────────────────────────────────────── */
+const FullChart = ({ data }) => {
+  const max = Math.max(...data, 1);
+  const labels = ['Apr 16','17','18','19','20','21','22','23','24','25','26','27','28','29'];
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+      <div style={{ display:'flex', alignItems:'flex-end', gap:6, height:140 }}>
+        {data.map((v, i) => (
+          <div key={i} style={{ flex:1, display:'flex', flexDirection:'column',
+            alignItems:'center', height:'100%', justifyContent:'flex-end' }}>
+            <div title={`${v} clicks`} style={{
+              width:'100%', borderRadius:'3px 3px 0 0',
+              background: i===data.length-1 ? 'var(--accent)' : 'rgba(14,165,233,0.3)',
+              height:`${v/max*100}%`, transformOrigin:'bottom', cursor:'pointer',
+              animation:`barGrow 0.7s ${i*0.04}s cubic-bezier(.16,1,.3,1) both`,
+              transition:'background 0.2s',
+            }}
+            onMouseEnter={e => e.target.style.background='var(--accent2)'}
+            onMouseLeave={e => e.target.style.background=i===data.length-1?'var(--accent)':'rgba(14,165,233,0.3)'}
+            />
+          </div>
+        ))}
+      </div>
+      <div style={{ display:'flex', gap:6 }}>
+        {labels.map((l, i) => (
+          <div key={i} style={{ flex:1, fontSize:9, color:'var(--text3)',
+            textAlign:'center', fontFamily:'var(--mono)' }}>
+            {i%3===0 ? l.replace('Apr ','') : ''}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+/* ─── ProgressBar ───────────────────────────────────────────────── */
+const ProgressBar = ({ pct, delay, gradient }) => (
+  <div style={{ height:4, borderRadius:99, background:'var(--surface3)' }}>
+    <div style={{
+      height:'100%', borderRadius:99, width:`${pct}%`,
+      background: gradient || 'linear-gradient(90deg, var(--accent), var(--accent2))',
+      animation:`barGrow 0.7s ${delay}s cubic-bezier(.16,1,.3,1) both`,
+      transformOrigin:'left',
+    }}/>
+  </div>
+);
+
+/* ─── Navbar ────────────────────────────────────────────────────── */
+const Navbar = ({ screen, setScreen, links, selectedLink, onNavAnalytics }) => (
+  <nav style={{ position:'sticky', top:0, zIndex:100, display:'flex',
+    alignItems:'center', padding:'0 28px', height:56,
+    background:'rgba(7,11,18,0.85)', backdropFilter:'blur(12px)',
+    borderBottom:'1px solid var(--border)' }}>
+
+    <div onClick={() => setScreen('landing')}
+      style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', marginRight:32 }}>
+      <div style={{ width:28, height:28, borderRadius:7,
+        background:'linear-gradient(135deg, var(--accent), #7dd3fc)',
+        display:'flex', alignItems:'center', justifyContent:'center', color:'#fff' }}>
+        <ZapIcon size={14}/>
+      </div>
+      <span style={{ fontWeight:700, fontSize:16, letterSpacing:'-0.02em' }}>snip</span>
+      <span style={{ fontWeight:300, fontSize:16, color:'var(--text3)', letterSpacing:'-0.01em' }}>.link</span>
+    </div>
+
+    {screen !== 'landing' && (
+      <div style={{ display:'flex', alignItems:'center', gap:2, flex:1 }}>
+        {[['dashboard','Dashboard',<GridIcon size={14}/>],
+          ['analytics','Analytics',<ChartIcon size={14}/>]].map(([s,label,icon]) => (
+          <button key={s} onClick={() => s === 'analytics' ? onNavAnalytics() : setScreen(s)} style={{
+            display:'flex', alignItems:'center', gap:6, padding:'6px 12px', borderRadius:8,
+            background: screen===s ? 'var(--surface3)' : 'transparent',
+            color: screen===s ? 'var(--text)' : 'var(--text2)',
+            fontSize:13, fontWeight:500, transition:'all 0.15s',
+            border: screen===s ? '1px solid var(--border)' : '1px solid transparent',
+          }}>{icon}{label}</button>
+        ))}
+      </div>
+    )}
+
+    <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:12 }}>
+      {screen === 'landing' ? (
+        <button onClick={() => setScreen('dashboard')} style={{
+          display:'flex', alignItems:'center', gap:8, padding:'8px 18px', borderRadius:10,
+          background:'var(--accent)', color:'#fff', fontSize:13, fontWeight:600,
+          transition:'all 0.2s', boxShadow:'0 0 20px var(--accent-glow)',
+        }}
+        onMouseEnter={e => { e.currentTarget.style.background='var(--accent2)'; e.currentTarget.style.transform='translateY(-1px)'; }}
+        onMouseLeave={e => { e.currentTarget.style.background='var(--accent)'; e.currentTarget.style.transform=''; }}>
+          Open Dashboard <ArrowIcon size={13}/>
+        </button>
+      ) : (
+        <>
+          <div style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 12px',
+            background:'var(--surface2)', borderRadius:8, border:'1px solid var(--border)',
+            fontSize:12, color:'var(--text2)' }}>
+            <div style={{ width:6, height:6, borderRadius:'50%', background:'var(--green)' }}/>
+            {links.length} links active
+          </div>
+          <button onClick={() => setScreen('landing')} style={{
+            width:32, height:32, borderRadius:8, background:'var(--surface2)',
+            border:'1px solid var(--border)', color:'var(--text2)',
+            display:'flex', alignItems:'center', justifyContent:'center', transition:'all 0.15s',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.background='var(--surface3)'; e.currentTarget.style.color='var(--text)'; }}
+          onMouseLeave={e => { e.currentTarget.style.background='var(--surface2)'; e.currentTarget.style.color='var(--text2)'; }}>
+            <LogoutIcon size={14}/>
+          </button>
+        </>
+      )}
+    </div>
+  </nav>
+);
+
+/* ─── Spinner ───────────────────────────────────────────────────── */
+const Spinner = () => (
+  <div style={{ width:14, height:14, border:'2px solid rgba(255,255,255,0.3)',
+    borderTopColor:'#fff', borderRadius:'50%', animation:'spin 0.7s linear infinite' }}/>
+);
+
+/* ─── Landing ───────────────────────────────────────────────────── */
+const Landing = ({ onShorten, setScreen }) => {
+  const [url, setUrl] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState('');
+  const [copied, setCopied] = useState(false);
+
+  const handleShorten = async () => {
+    if (!url.trim() || loading) return;
+    setError(''); setLoading(true);
+    try {
+      const data = await API.shorten(url.trim());
+      onShorten(data);
+      const short = data.shortUrl.replace(/^https?:\/\/[^/]+\//, 'snip.link/');
+      setResult(short);
+      setUrl('');
+    } catch (e) { setError(e.message); }
+    finally { setLoading(false); }
+  };
+
+  const handleCopy = () => {
+    navigator.clipboard?.writeText('https://' + result).catch(() => {});
+    setCopied(true); setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div style={{ minHeight:'calc(100vh - 56px)', display:'flex', flexDirection:'column',
+      alignItems:'center', justifyContent:'center', padding:'60px 24px', position:'relative' }}>
+
+      <div style={{ position:'absolute', top:'10%', left:'50%', transform:'translateX(-50%)',
+        width:600, height:400,
+        background:'radial-gradient(ellipse, rgba(14,165,233,0.07) 0%, transparent 70%)',
+        pointerEvents:'none' }}/>
+
+      <div className="fade-up" style={{ marginBottom:24 }}>
+        <Chip color="accent">&#9889; Blazing fast link shortener</Chip>
+      </div>
+
+      <h1 className="fade-up-2" style={{
+        fontSize:'clamp(40px,6vw,72px)', fontWeight:700, letterSpacing:'-0.04em',
+        textAlign:'center', lineHeight:1.08, maxWidth:700,
+        background:'linear-gradient(160deg, #e8edf5 30%, #6b90c0)',
+        WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', marginBottom:16,
+      }}>
+        Shorten any link.<br/>Track every click.
+      </h1>
+
+      <p className="fade-up-3" style={{ fontSize:17, color:'var(--text2)', textAlign:'center',
+        maxWidth:420, lineHeight:1.6, marginBottom:40 }}>
+        Turn long URLs into sharp, trackable links &#8212; with real-time analytics on clicks, referrers, and geography.
+      </p>
+
+      <div className="fade-up-4" style={{ width:'100%', maxWidth:580 }}>
+        <div style={{ display:'flex', alignItems:'stretch', background:'var(--surface)',
+          border:'1px solid var(--border)', borderRadius:14, padding:6,
+          boxShadow: result ? '0 0 0 2px var(--accent-glow)' : '0 0 40px rgba(0,0,0,0.4)',
+          transition:'box-shadow 0.3s' }}>
+          <div style={{ display:'flex', alignItems:'center', paddingLeft:12, color:'var(--text3)' }}>
+            <LinkIcon size={16}/>
+          </div>
+          <input value={url} onChange={e => setUrl(e.target.value)}
+            onKeyDown={e => e.key==='Enter' && handleShorten()}
+            placeholder="Paste your long URL here&#8230;"
+            style={{ flex:1, padding:'12px 14px', background:'transparent', border:'none',
+              fontSize:14, color:'var(--text)', caretColor:'var(--accent)' }}/>
+          <button onClick={handleShorten} style={{
+            padding:'10px 22px', borderRadius:10,
+            background: loading ? 'var(--surface3)' : 'var(--accent)',
+            color:'#fff', fontSize:13, fontWeight:600,
+            display:'flex', alignItems:'center', gap:8, transition:'all 0.2s',
+            boxShadow: loading ? 'none' : '0 0 20px var(--accent-glow)',
+          }}>
+            {loading ? <Spinner/> : <><span>Shorten</span><ZapIcon size={13}/></>}
+          </button>
+        </div>
+
+        {error && (
+          <div style={{ marginTop:8, padding:'8px 12px', borderRadius:8,
+            background:'rgba(240,93,106,0.1)', border:'1px solid rgba(240,93,106,0.3)',
+            color:'var(--red)', fontSize:13 }}>{error}</div>
+        )}
+
+        {result && (
+          <div style={{ marginTop:12, padding:'14px 16px', background:'var(--surface)',
+            border:'1px solid rgba(14,165,233,0.3)', borderRadius:12,
+            display:'flex', alignItems:'center', gap:12, animation:'fadeUp 0.3s ease' }}>
+            <div style={{ flex:1 }}>
+              <div style={{ fontSize:11, color:'var(--text3)', marginBottom:3, fontWeight:500 }}>YOUR SHORT LINK</div>
+              <div className="mono" style={{ color:'var(--accent)', fontSize:15, fontWeight:600 }}>{result}</div>
+            </div>
+            <button onClick={handleCopy} style={{
+              display:'flex', alignItems:'center', gap:6, padding:'7px 14px', borderRadius:8,
+              background: copied ? 'rgba(16,217,160,0.15)' : 'var(--accent-dim)',
+              color: copied ? 'var(--green)' : 'var(--accent)',
+              border:`1px solid ${copied ? 'rgba(16,217,160,0.3)' : 'rgba(14,165,233,0.25)'}`,
+              fontSize:12, fontWeight:600, transition:'all 0.2s',
+            }}>
+              {copied ? <CheckIcon size={13}/> : <CopyIcon size={13}/>}
+              {copied ? 'Copied!' : 'Copy'}
+            </button>
+            <button onClick={() => setScreen('dashboard')} style={{
+              display:'flex', alignItems:'center', gap:6, padding:'7px 14px', borderRadius:8,
+              background:'var(--surface2)', border:'1px solid var(--border)',
+              color:'var(--text2)', fontSize:12, fontWeight:600,
+            }}>
+              View all <ArrowIcon size={12}/>
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div style={{ marginTop:72, display:'flex', gap:48, justifyContent:'center', flexWrap:'wrap' }}>
+        {[['28.4M','Links shortened','↑ 12% this month'],
+          ['1.2B','Clicks tracked',null],
+          ['190+','Countries reached',null]].map(([v,l,s],i) => (
+          <Stat key={i} value={v} label={l} sub={s} delay={`${i*0.1}s`}/>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+/* ─── LinkRow ───────────────────────────────────────────────────── */
+const LinkRow = ({ link, onView, onDelete }) => {
+  const [copied, setCopied] = useState(false);
+  const daily = link.daily || Array(8).fill(Math.max(1, Math.ceil((link.clickCount||0)/8)));
+
+  const handleCopy = e => {
+    e.stopPropagation();
+    navigator.clipboard?.writeText(`https://snip.link/${link.shortCode}`).catch(() => {});
+    setCopied(true); setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div onClick={() => onView(link)}
+      style={{ display:'grid', gridTemplateColumns:'1fr auto auto auto',
+        alignItems:'center', gap:16, padding:'16px 20px', borderRadius:12,
+        background:'var(--surface)', border:'1px solid var(--border)',
+        cursor:'pointer', transition:'all 0.18s' }}
+      onMouseEnter={e => { e.currentTarget.style.background='var(--surface2)'; e.currentTarget.style.borderColor='var(--border2)'; }}
+      onMouseLeave={e => { e.currentTarget.style.background='var(--surface)'; e.currentTarget.style.borderColor='var(--border)'; }}>
+
+      <div style={{ minWidth:0 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:5 }}>
+          <span className="mono" style={{ color:'var(--accent)', fontWeight:600, fontSize:14 }}>
+            snip.link/{link.shortCode}
+          </span>
+          <Chip color="green">Active</Chip>
+        </div>
+        <div style={{ fontSize:12, color:'var(--text3)', overflow:'hidden',
+          textOverflow:'ellipsis', whiteSpace:'nowrap', maxWidth:400 }}>{link.longUrl}</div>
+      </div>
+
+      <div style={{ textAlign:'right', minWidth:80 }}>
+        <div style={{ fontSize:18, fontWeight:700, letterSpacing:'-0.02em' }}>
+          {(link.clickCount || 0).toLocaleString()}
+        </div>
+        <div style={{ fontSize:11, color:'var(--text3)' }}>clicks</div>
+      </div>
+
+      <div style={{ width:72 }}>
+        <MiniChart data={daily.slice(-8)} height={36}/>
+      </div>
+
+      <div style={{ display:'flex', gap:6 }} onClick={e => e.stopPropagation()}>
+        <button onClick={handleCopy} style={{
+          width:32, height:32, borderRadius:8,
+          background: copied ? 'rgba(16,217,160,0.12)' : 'var(--surface2)',
+          border:`1px solid ${copied ? 'rgba(16,217,160,0.3)' : 'var(--border)'}`,
+          color: copied ? 'var(--green)' : 'var(--text2)',
+          display:'flex', alignItems:'center', justifyContent:'center', transition:'all 0.18s',
+        }}>
+          {copied ? <CheckIcon size={13}/> : <CopyIcon size={13}/>}
+        </button>
+        <button onClick={e => { e.stopPropagation(); onDelete(link.shortCode); }} style={{
+          width:32, height:32, borderRadius:8, background:'var(--surface2)',
+          border:'1px solid var(--border)', color:'var(--text3)',
+          display:'flex', alignItems:'center', justifyContent:'center', transition:'all 0.18s',
+        }}
+        onMouseEnter={e => { e.currentTarget.style.background='rgba(240,93,106,0.1)'; e.currentTarget.style.color='var(--red)'; e.currentTarget.style.borderColor='rgba(240,93,106,0.3)'; }}
+        onMouseLeave={e => { e.currentTarget.style.background='var(--surface2)'; e.currentTarget.style.color='var(--text3)'; e.currentTarget.style.borderColor='var(--border)'; }}>
+          <TrashIcon size={13}/>
+        </button>
+      </div>
+    </div>
+  );
+};
+
+/* ─── Dashboard ─────────────────────────────────────────────────── */
+const Dashboard = ({ links, setLinks, onView }) => {
+  const [url, setUrl] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [fetching, setFetching] = useState(false);
+  const [search, setSearch] = useState('');
+  const [error, setError] = useState('');
+  const [lookup, setLookup] = useState('');
+  const [lookupResult, setLookupResult] = useState(null);
+  const [lookupError, setLookupError] = useState('');
+  const [lookupLoading, setLookupLoading] = useState(false);
+
+  // Load all links from backend on first mount
+  useEffect(() => {
+    setFetching(true);
+    API.fetchAll()
+      .then(data => {
+        const enriched = data.map(enrichLink);
+        setLinks(enriched);
+      })
+      .catch(() => {}) // silently fail — in-memory store may be empty
+      .finally(() => setFetching(false));
+  }, []); // eslint-disable-line
+
+  const handleShorten = async () => {
+    if (!url.trim() || loading) return;
+    setError(''); setLoading(true);
+    try {
+      const data = await API.shorten(url.trim());
+      setLinks(p => upsertLink(p, enrichLink(data)));
+      setUrl('');
+    } catch (e) { setError(e.message); }
+    finally { setLoading(false); }
+  };
+
+  const handleLookup = async () => {
+    if (!lookup.trim() || lookupLoading) return;
+    setLookupError(''); setLookupResult(null); setLookupLoading(true);
+    try {
+      const data = await API.expandShortUrl(lookup);
+      const link = enrichLink(data);
+      setLookupResult(link);
+      setLinks(p => upsertLink(p, link));
+    } catch (e) {
+      setLookupError('Short URL not found');
+    } finally {
+      setLookupLoading(false);
+    }
+  };
+
+  const handleDelete = async (code) => {
+    try { await API.del(code); setLinks(p => p.filter(l => l.shortCode !== code)); } catch {}
+  };
+
+  const totalClicks = links.reduce((a, b) => a + (b.clickCount || 0), 0);
+  const filtered = links.filter(l =>
+    l.shortCode?.toLowerCase().includes(search.toLowerCase()) ||
+    l.longUrl?.toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div style={{ maxWidth:900, margin:'0 auto', padding:'36px 24px' }}>
+      {/* KPI */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:16, marginBottom:28 }}>
+        {[
+          { label:'Total Links',  value: links.length,                icon:<LinkIcon  size={16}/>, color:'var(--accent)' },
+          { label:'Total Clicks', value: totalClicks.toLocaleString(), icon:<ChartIcon size={16}/>, color:'var(--green)' },
+          { label:'Avg. CTR',     value: '3.2%',                      icon:<ZapIcon   size={16}/>, color:'var(--yellow)' },
+        ].map((s, i) => (
+          <div key={i} className="fade-up" style={{ animationDelay:`${i*0.08}s`,
+            padding:'20px 22px', borderRadius:14,
+            background:'var(--surface)', border:'1px solid var(--border)' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
+              <span style={{ fontSize:12, color:'var(--text2)', fontWeight:500 }}>{s.label}</span>
+              <span style={{ color:s.color, opacity:0.8 }}>{s.icon}</span>
+            </div>
+            <div style={{ fontSize:26, fontWeight:700, letterSpacing:'-0.02em' }}>{s.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Quick add + search */}
+      <div className="fade-up" style={{ marginBottom:20, display:'flex', gap:8 }}>
+        <div style={{ flex:1, display:'flex', alignItems:'center', gap:8,
+          background:'var(--surface)', border:'1px solid var(--border)', borderRadius:10, padding:'0 14px' }}>
+          <LinkIcon size={14} stroke="var(--text3)"/>
+          <input value={url} onChange={e => setUrl(e.target.value)}
+            onKeyDown={e => e.key==='Enter' && handleShorten()}
+            placeholder="Shorten a new URL&#8230;"
+            style={{ flex:1, padding:'11px 0', background:'transparent', border:'none',
+              fontSize:13, color:'var(--text)', caretColor:'var(--accent)' }}/>
+        </div>
+        <button onClick={handleShorten} style={{
+          display:'flex', alignItems:'center', gap:6, padding:'0 18px', borderRadius:10,
+          background:'var(--accent)', color:'#fff', fontSize:13, fontWeight:600,
+          boxShadow:'0 0 20px var(--accent-glow)', transition:'all 0.2s',
+        }}>
+          {loading ? <Spinner/> : <><PlusIcon size={14}/> Add</>}
+        </button>
+        <div style={{ display:'flex', alignItems:'center', gap:8,
+          background:'var(--surface)', border:'1px solid var(--border)', borderRadius:10, padding:'0 14px' }}>
+          <SearchIcon size={14} stroke="var(--text3)"/>
+          <input value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Search links&#8230;"
+            style={{ width:140, padding:'11px 0', background:'transparent', border:'none',
+              fontSize:13, color:'var(--text)', caretColor:'var(--accent)' }}/>
+        </div>
+      </div>
+
+      {error && (
+        <div style={{ marginBottom:12, padding:'8px 12px', borderRadius:8,
+          background:'rgba(240,93,106,0.1)', border:'1px solid rgba(240,93,106,0.3)',
+          color:'var(--red)', fontSize:13 }}>{error}</div>
+      )}
+
+      <div className="fade-up" style={{ marginBottom:20, padding:16, borderRadius:12,
+        background:'var(--surface)', border:'1px solid var(--border)' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12 }}>
+          <ExternalIcon size={14} stroke="var(--accent)"/>
+          <div style={{ fontSize:13, fontWeight:600 }}>Find original URL</div>
+        </div>
+        <div style={{ display:'flex', gap:8 }}>
+          <div style={{ flex:1, display:'flex', alignItems:'center', gap:8,
+            background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:10, padding:'0 14px' }}>
+            <SearchIcon size={14} stroke="var(--text3)"/>
+            <input value={lookup} onChange={e => setLookup(e.target.value)}
+              onKeyDown={e => e.key==='Enter' && handleLookup()}
+              placeholder="Paste short URL or code"
+              style={{ flex:1, padding:'11px 0', background:'transparent', border:'none',
+                fontSize:13, color:'var(--text)', caretColor:'var(--accent)' }}/>
+          </div>
+          <button onClick={handleLookup} style={{
+            display:'flex', alignItems:'center', gap:6, padding:'0 16px', borderRadius:10,
+            background:'var(--surface3)', border:'1px solid var(--border2)',
+            color:'var(--text)', fontSize:13, fontWeight:600,
+          }}>
+            {lookupLoading ? <Spinner/> : <><SearchIcon size={13}/> Lookup</>}
+          </button>
+        </div>
+        {lookupError && (
+          <div style={{ marginTop:10, fontSize:12, color:'var(--red)' }}>{lookupError}</div>
+        )}
+        {lookupResult && (
+          <div style={{ marginTop:12, display:'grid', gridTemplateColumns:'auto 1fr auto auto', gap:10,
+            alignItems:'center', padding:'10px 12px', borderRadius:10,
+            background:'var(--surface2)', border:'1px solid var(--border)' }}>
+            <LinkIcon size={14} stroke="var(--accent)"/>
+            <div style={{ minWidth:0 }}>
+              <div className="mono" style={{ fontSize:12, color:'var(--accent)', marginBottom:3 }}>
+                snip.link/{lookupResult.shortCode}
+              </div>
+              <div style={{ fontSize:13, color:'var(--text)', overflow:'hidden',
+                textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{lookupResult.longUrl}</div>
+            </div>
+            <a href={`/${lookupResult.shortCode}`} target="_blank" rel="noopener noreferrer"
+              style={{
+                display:'flex', alignItems:'center', gap:6, padding:'7px 12px', borderRadius:8,
+                background:'var(--surface3)', border:'1px solid var(--border2)',
+                color:'var(--text2)', fontSize:12, fontWeight:600, textDecoration:'none',
+              }}>
+              Open <ExternalIcon size={12}/>
+            </a>
+            <button onClick={() => onView(lookupResult)} style={{
+              display:'flex', alignItems:'center', gap:6, padding:'7px 12px', borderRadius:8,
+              background:'var(--accent-dim)', border:'1px solid rgba(14,165,233,0.25)',
+              color:'var(--accent)', fontSize:12, fontWeight:600,
+            }}>
+              Stats <ArrowIcon size={12}/>
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Link list */}
+      <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+        {fetching ? (
+          [0,1,2].map(i => (
+            <div key={i} style={{ height:72, borderRadius:12, background:'var(--surface)',
+              border:'1px solid var(--border)', opacity: 0.5 - i*0.1 }}/>
+          ))
+        ) : (
+          <>
+            {filtered.map((link, i) => (
+              <div key={link.shortCode} className="fade-up" style={{ animationDelay:`${i*0.05}s` }}>
+                <LinkRow link={link} onView={onView} onDelete={handleDelete}/>
+              </div>
+            ))}
+            {filtered.length === 0 && (
+              <div style={{ textAlign:'center', padding:'48px 0', color:'var(--text3)', fontSize:14 }}>
+                No links found. Add one above.
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
+
+/* ─── Analytics ─────────────────────────────────────────────────── */
+const Analytics = ({ link, onBack }) => {
+  const [copied, setCopied] = useState(false);
+  const [clickCount, setClickCount] = useState(link.clickCount || 0);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const fetchStats = () => {
+    setRefreshing(true);
+    API.stats(link.shortCode)
+      .then(d => setClickCount(d.clickCount))
+      .catch(() => {})
+      .finally(() => setRefreshing(false));
+  };
+
+  useEffect(() => { fetchStats(); }, [link.shortCode]);
+
+  const handleCopy = () => {
+    navigator.clipboard?.writeText(`https://snip.link/${link.shortCode}`).catch(() => {});
+    setCopied(true); setTimeout(() => setCopied(false), 2000);
+  };
+
+  const analytics = mockAnalytics(clickCount);
+  const daily = (link.daily && link.daily.some(v => v > 0)) ? link.daily : analytics.daily;
+  const avgPerDay = Math.round(daily.reduce((a,b)=>a+b,0) / daily.length);
+  const peakDay   = Math.max(...daily);
+
+  return (
+    <div style={{ maxWidth:900, margin:'0 auto', padding:'36px 24px' }}>
+      {/* Header */}
+      <div className="fade-up" style={{ display:'flex', alignItems:'center', gap:12, marginBottom:28 }}>
+        <button onClick={onBack} style={{
+          display:'flex', alignItems:'center', gap:6, padding:'7px 12px', borderRadius:8,
+          background:'var(--surface)', border:'1px solid var(--border)',
+          color:'var(--text2)', fontSize:12, fontWeight:500, transition:'all 0.15s',
+        }}
+        onMouseEnter={e => e.currentTarget.style.color='var(--text)'}
+        onMouseLeave={e => e.currentTarget.style.color='var(--text2)'}>
+          <BackIcon size={14}/> Back
+        </button>
+
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+            <span className="mono" style={{ fontSize:20, fontWeight:700, color:'var(--accent)' }}>
+              snip.link/{link.shortCode}
+            </span>
+            <Chip color="green">Active</Chip>
+          </div>
+          <div style={{ fontSize:12, color:'var(--text3)', marginTop:3,
+            overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{link.longUrl}</div>
+        </div>
+
+        <button onClick={fetchStats} style={{
+          display:'flex', alignItems:'center', gap:6, padding:'8px 14px', borderRadius:9,
+          background:'var(--surface)', border:'1px solid var(--border)',
+          color:'var(--text2)', fontSize:13, fontWeight:600, transition:'all 0.2s',
+        }}>
+          {refreshing ? <Spinner/> : '↻'} Refresh
+        </button>
+        <button onClick={handleCopy} style={{
+          display:'flex', alignItems:'center', gap:6, padding:'8px 14px', borderRadius:9,
+          background: copied ? 'rgba(16,217,160,0.1)' : 'var(--accent-dim)',
+          color: copied ? 'var(--green)' : 'var(--accent)',
+          border:`1px solid ${copied ? 'rgba(16,217,160,0.3)' : 'rgba(14,165,233,0.25)'}`,
+          fontSize:13, fontWeight:600, transition:'all 0.2s',
+        }}>
+          {copied ? <CheckIcon size={13}/> : <CopyIcon size={13}/>}
+          {' '}{copied ? 'Copied!' : 'Copy link'}
+        </button>
+      </div>
+
+      {/* KPI row */}
+      <div className="fade-up-2" style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12, marginBottom:20 }}>
+        {[
+          { label:'Total Clicks', value: clickCount.toLocaleString(), color:'var(--accent)' },
+          { label:'Avg / Day',    value: avgPerDay,                    color:'var(--text)' },
+          { label:'Peak Day',     value: peakDay,                      color:'var(--green)' },
+          { label:'Created',      value: (link.createdAt||'').slice(0,10) || '&#8212;', color:'var(--text)' },
+        ].map((k, i) => (
+          <div key={i} style={{ padding:'18px 20px', borderRadius:12,
+            background:'var(--surface)', border:'1px solid var(--border)' }}>
+            <div style={{ fontSize:11, color:'var(--text2)', marginBottom:8, fontWeight:500 }}>{k.label}</div>
+            <div className={k.label==='Created' ? 'mono' : ''} style={{
+              fontSize: k.label==='Created' ? 13 : 24, fontWeight:700,
+              color:k.color, letterSpacing:'-0.02em' }}
+              dangerouslySetInnerHTML={k.label==='Created' ? {__html:k.value} : undefined}>
+              {k.label!=='Created' ? k.value : undefined}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Bar chart */}
+      <div className="fade-up-3" style={{ padding:24, borderRadius:14,
+        background:'var(--surface)', border:'1px solid var(--border)', marginBottom:20 }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:20 }}>
+          <div>
+            <div style={{ fontWeight:600, fontSize:15 }}>Clicks over time</div>
+            <div style={{ fontSize:12, color:'var(--text2)', marginTop:2 }}>Last 14 days</div>
+          </div>
+          <Chip color="accent">{clickCount.toLocaleString()} total</Chip>
+        </div>
+        <FullChart data={daily}/>
+      </div>
+
+      {/* Referrers + Geo */}
+      <div className="fade-up-4" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
+        <div style={{ padding:24, borderRadius:14, background:'var(--surface)', border:'1px solid var(--border)' }}>
+          <div style={{ fontWeight:600, fontSize:15, marginBottom:4 }}>Referrers</div>
+          <div style={{ fontSize:12, color:'var(--text2)', marginBottom:20 }}>Where clicks are coming from</div>
+          <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+            {analytics.refs.map((r, i) => (
+              <div key={i}>
+                <div style={{ display:'flex', justifyContent:'space-between', marginBottom:5 }}>
+                  <span style={{ fontSize:13 }}>{r.source}</span>
+                  <span style={{ fontSize:12, color:'var(--text2)', fontFamily:'var(--mono)' }}>{r.pct}%</span>
+                </div>
+                <ProgressBar pct={r.pct} delay={i*0.08}/>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ padding:24, borderRadius:14, background:'var(--surface)', border:'1px solid var(--border)' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
+            <GlobeIcon size={15}/>
+            <span style={{ fontWeight:600, fontSize:15 }}>Geography</span>
+          </div>
+          <div style={{ fontSize:12, color:'var(--text2)', marginBottom:20 }}>Top countries</div>
+          <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+            {analytics.geo.map((g, i) => (
+              <div key={i} style={{ display:'flex', alignItems:'center', gap:10 }}>
+                <span style={{ fontSize:18, lineHeight:1 }}>{g.flag}</span>
+                <div style={{ flex:1 }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', marginBottom:4 }}>
+                    <span style={{ fontSize:12 }}>{g.country}</span>
+                    <span style={{ fontSize:12, color:'var(--text2)', fontFamily:'var(--mono)' }}>{g.pct}%</span>
+                  </div>
+                  <ProgressBar pct={g.pct} delay={i*0.08}
+                    gradient="linear-gradient(90deg, rgba(14,165,233,0.5), rgba(56,189,248,0.8))"/>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ─── App ───────────────────────────────────────────────────────── */
+const App = () => {
+  const [screen, setScreen]             = useState('landing');
+  const [links, setLinks]               = useState([]);
+  const [selectedLink, setSelectedLink] = useState(null);
+
+  const handleShorten = (data) => {
+    const link = enrichLink(data);
+    setLinks(p => upsertLink(p, link));
+  };
+
+  const handleView = (link) => {
+    setSelectedLink(link);
+    setScreen('analytics');
+  };
+
+  // Analytics nav button: go to analytics only if a link is selected, else go to dashboard
+  const handleNavAnalytics = () => {
+    if (selectedLink) setScreen('analytics');
+    else setScreen('dashboard');
+  };
+
+  return (
+    <>
+      <Navbar screen={screen} setScreen={setScreen} links={links}
+        selectedLink={selectedLink} onNavAnalytics={handleNavAnalytics}/>
+      {screen === 'landing'   && <Landing   onShorten={handleShorten} setScreen={setScreen}/>}
+      {screen === 'dashboard' && <Dashboard links={links} setLinks={setLinks} onView={handleView}/>}
+      {screen === 'analytics' && selectedLink && (
+        <Analytics link={selectedLink} onBack={() => setScreen('dashboard')}/>
+      )}
+    </>
+  );
+};
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
