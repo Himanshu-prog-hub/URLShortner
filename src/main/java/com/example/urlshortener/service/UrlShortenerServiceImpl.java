@@ -7,6 +7,9 @@ import com.example.urlshortener.exception.CodeAlreadyExistsException;
 import com.example.urlshortener.exception.UrlNotFoundException;
 import com.example.urlshortener.model.UrlMapping;
 import com.example.urlshortener.repository.UrlRepository;
+
+import jakarta.transaction.Transactional;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -33,6 +36,7 @@ public class UrlShortenerServiceImpl implements UrlShortenerService {
         this.codeLength = codeLength;
     }
 
+    @Transactional
     @Override
     public ShortenResponse shorten(ShortenRequest request) {
         String normalizedLongUrl = normalizeLongUrl(request.getLongUrl());
@@ -78,6 +82,7 @@ public class UrlShortenerServiceImpl implements UrlShortenerService {
                 .build();
     }
 
+    @Transactional
     @Override
     public String resolveAndTrack(String shortCode) {
         UrlMapping mapping = urlRepository.findByShortCode(shortCode)
@@ -86,6 +91,7 @@ public class UrlShortenerServiceImpl implements UrlShortenerService {
         return mapping.getLongUrl();
     }
 
+    @Transactional
     @Override
     public StatsResponse getStats(String shortCode) {
         UrlMapping mapping = urlRepository.findByShortCode(shortCode)
@@ -99,6 +105,7 @@ public class UrlShortenerServiceImpl implements UrlShortenerService {
                 .build();
     }
 
+    @Transactional
     @Override
     public void delete(String shortCode) {
         boolean deleted = urlRepository.deleteByShortCode(shortCode);
