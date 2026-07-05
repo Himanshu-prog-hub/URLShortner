@@ -9,6 +9,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
+<script src="https://unpkg.com/framer-motion@10.18.0/dist/framer-motion.js" crossorigin></script>
 <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -54,19 +55,7 @@
   ::-webkit-scrollbar { width: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
-  @keyframes fadeUp {
-    from { opacity: 0; transform: translateY(16px); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
   @keyframes spin { to { transform: rotate(360deg); } }
-  @keyframes barGrow {
-    from { transform: scaleY(0); }
-    to   { transform: scaleY(1); }
-  }
-  .fade-up   { animation: fadeUp 0.4s ease both; }
-  .fade-up-2 { animation: fadeUp 0.4s 0.08s ease both; }
-  .fade-up-3 { animation: fadeUp 0.4s 0.16s ease both; }
-  .fade-up-4 { animation: fadeUp 0.4s 0.24s ease both; }
   button { cursor: pointer; font-family: var(--font); border: none; outline: none; }
   input  { font-family: var(--font); outline: none; }
   .mono  { font-family: var(--mono); }
@@ -76,6 +65,39 @@
 <div id="root"></div>
 <script type="text/babel">
 const { useState, useEffect } = React;
+const { motion, AnimatePresence } = window.Motion;
+
+/* ─── Animation constants ────────────────────────────────────────── */
+const EASE = [0.16, 1, 0.3, 1];
+const SPRING = { type: 'spring', stiffness: 380, damping: 30 };
+
+const fadeUp = {
+  hidden: { opacity: 0, y: 20 },
+  show:   { opacity: 1, y: 0, transition: { duration: 0.5, ease: EASE } },
+};
+
+const staggerWrap = (delay = 0.07) => ({
+  hidden: {},
+  show:   { transition: { staggerChildren: delay, delayChildren: 0.04 } },
+});
+
+const staggerItem = {
+  hidden: { opacity: 0, y: 16 },
+  show:   { opacity: 1, y: 0, transition: { duration: 0.42, ease: EASE } },
+};
+
+const pageVariants = {
+  initial: { opacity: 0, y: 12 },
+  animate: { opacity: 1, y: 0,  transition: { duration: 0.35, ease: EASE } },
+  exit:    { opacity: 0, y: -8, transition: { duration: 0.2, ease: 'easeIn' } },
+};
+
+const listItem = {
+  hidden: { opacity: 0, y: 12 },
+  show:   { opacity: 1, y: 0,   transition: { duration: 0.35, ease: EASE } },
+  exit:   { opacity: 0, x: -16, height: 0, marginBottom: 0, paddingTop: 0, paddingBottom: 0,
+            transition: { duration: 0.25, ease: 'easeIn' } },
+};
 
 /* ─── API helpers ─────────────────────────────────────────────── */
 const API = {
@@ -103,11 +125,11 @@ const API = {
   async fetchAll() {
     const r = await fetch('/links');
     if (!r.ok) throw new Error('Failed to load links');
-    return r.json(); // List<StatsResponse>
+    return r.json();
   },
 };
 
-/* ─── Mock analytics (backend tracks clicks only in Layer 1) ─── */
+/* ─── Mock analytics ────────────────────────────────────────────── */
 const mockAnalytics = (n) => ({
   refs: [
     { source: 'Twitter / X', pct: 34, count: Math.round(n * 0.34) },
@@ -117,7 +139,7 @@ const mockAnalytics = (n) => ({
     { source: 'Other',       pct:  8, count: Math.round(n * 0.08) },
   ],
   geo: [
-    { country: 'United States', pct: 42, flag: '\u{1F1FA}\u{1F1F8}' },
+    { country: 'United States',  pct: 42, flag: '\u{1F1FA}\u{1F1F8}' },
     { country: 'United Kingdom', pct: 18, flag: '\u{1F1EC}\u{1F1E7}' },
     { country: 'Germany',        pct: 12, flag: '\u{1F1E9}\u{1F1EA}' },
     { country: 'Canada',         pct:  9, flag: '\u{1F1E8}\u{1F1E6}' },
@@ -160,17 +182,17 @@ const Icon = ({ d, size = 16, stroke = 'currentColor', fill = 'none', sw = 1.6 }
     {Array.isArray(d) ? d.map((p, i) => <path key={i} d={p}/>) : <path d={d}/>}
   </svg>
 );
-const CopyIcon   = p => <Icon {...p} d="M8 4H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-2M8 4a2 2 0 012-2h4a2 2 0 012 2M8 4h8"/>;
-const CheckIcon  = p => <Icon {...p} d="M20 6L9 17l-5-5"/>;
-const LinkIcon   = p => <Icon {...p} d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/>;
-const ChartIcon  = p => <Icon {...p} d="M18 20V10M12 20V4M6 20v-6"/>;
-const GridIcon   = p => <Icon {...p} d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z"/>;
-const LogoutIcon = p => <Icon {...p} d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/>;
-const PlusIcon   = p => <Icon {...p} d="M12 5v14M5 12h14"/>;
-const ArrowIcon  = p => <Icon {...p} d="M5 12h14M12 5l7 7-7 7"/>;
-const TrashIcon  = p => <Icon {...p} d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/>;
-const GlobeIcon  = p => <Icon {...p} d="M12 2a10 10 0 100 20A10 10 0 0012 2zM2 12h20M12 2a15.3 15.3 0 010 20M12 2a15.3 15.3 0 000 20"/>;
-const ZapIcon    = p => <Icon {...p} d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" fill="currentColor" stroke="none"/>;
+const CopyIcon     = p => <Icon {...p} d="M8 4H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-2M8 4a2 2 0 012-2h4a2 2 0 012 2M8 4h8"/>;
+const CheckIcon    = p => <Icon {...p} d="M20 6L9 17l-5-5"/>;
+const LinkIcon     = p => <Icon {...p} d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/>;
+const ChartIcon    = p => <Icon {...p} d="M18 20V10M12 20V4M6 20v-6"/>;
+const GridIcon     = p => <Icon {...p} d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z"/>;
+const LogoutIcon   = p => <Icon {...p} d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/>;
+const PlusIcon     = p => <Icon {...p} d="M12 5v14M5 12h14"/>;
+const ArrowIcon    = p => <Icon {...p} d="M5 12h14M12 5l7 7-7 7"/>;
+const TrashIcon    = p => <Icon {...p} d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/>;
+const GlobeIcon    = p => <Icon {...p} d="M12 2a10 10 0 100 20A10 10 0 0012 2zM2 12h20M12 2a15.3 15.3 0 010 20M12 2a15.3 15.3 0 000 20"/>;
+const ZapIcon      = p => <Icon {...p} d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" fill="currentColor" stroke="none"/>;
 const BackIcon     = p => <Icon {...p} d="M19 12H5M12 19l-7-7 7-7"/>;
 const SearchIcon   = p => <Icon {...p} d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z"/>;
 const ExternalIcon = p => <Icon {...p} d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3"/>;
@@ -192,12 +214,12 @@ const Chip = ({ children, color = 'accent' }) => {
 };
 
 /* ─── Stat ──────────────────────────────────────────────────────── */
-const Stat = ({ label, value, sub, delay = '0s' }) => (
-  <div className="fade-up" style={{ animationDelay: delay }}>
+const Stat = ({ label, value, sub }) => (
+  <motion.div variants={staggerItem} whileInView="show" initial="hidden" viewport={{ once: true, margin: '-40px' }}>
     <div style={{ fontSize:32, fontWeight:700, color:'var(--text)', letterSpacing:'-0.02em' }}>{value}</div>
     <div style={{ fontSize:13, color:'var(--text2)', marginTop:2 }}>{label}</div>
     {sub && <div style={{ fontSize:11, color:'var(--accent)', marginTop:2 }}>{sub}</div>}
-  </div>
+  </motion.div>
 );
 
 /* ─── MiniChart ─────────────────────────────────────────────────── */
@@ -206,12 +228,16 @@ const MiniChart = ({ data, height = 48 }) => {
   return (
     <div style={{ display:'flex', alignItems:'flex-end', gap:2, height }}>
       {data.map((v, i) => (
-        <div key={i} style={{
-          flex:1, borderRadius:'2px 2px 0 0',
-          background: i === data.length-1 ? 'var(--accent)' : 'rgba(14,165,233,0.25)',
-          height:`${v/max*100}%`, transformOrigin:'bottom',
-          animation:`barGrow 0.6s ${i*0.03}s cubic-bezier(.16,1,.3,1) both`,
-        }}/>
+        <motion.div key={i}
+          initial={{ scaleY: 0 }}
+          animate={{ scaleY: 1 }}
+          transition={{ duration: 0.5, delay: i * 0.03, ease: EASE }}
+          style={{
+            flex:1, borderRadius:'2px 2px 0 0',
+            background: i === data.length-1 ? 'var(--accent)' : 'rgba(14,165,233,0.25)',
+            height:`${v/max*100}%`, transformOrigin:'bottom',
+          }}
+        />
       ))}
     </div>
   );
@@ -227,15 +253,18 @@ const FullChart = ({ data }) => {
         {data.map((v, i) => (
           <div key={i} style={{ flex:1, display:'flex', flexDirection:'column',
             alignItems:'center', height:'100%', justifyContent:'flex-end' }}>
-            <div title={`${v} clicks`} style={{
-              width:'100%', borderRadius:'3px 3px 0 0',
-              background: i===data.length-1 ? 'var(--accent)' : 'rgba(14,165,233,0.3)',
-              height:`${v/max*100}%`, transformOrigin:'bottom', cursor:'pointer',
-              animation:`barGrow 0.7s ${i*0.04}s cubic-bezier(.16,1,.3,1) both`,
-              transition:'background 0.2s',
-            }}
-            onMouseEnter={e => e.target.style.background='var(--accent2)'}
-            onMouseLeave={e => e.target.style.background=i===data.length-1?'var(--accent)':'rgba(14,165,233,0.3)'}
+            <motion.div
+              title={`${v} clicks`}
+              initial={{ scaleY: 0 }}
+              whileInView={{ scaleY: 1 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.6, delay: i * 0.04, ease: EASE }}
+              whileHover={{ background: 'var(--accent2)' }}
+              style={{
+                width:'100%', borderRadius:'3px 3px 0 0', cursor:'pointer',
+                background: i===data.length-1 ? 'var(--accent)' : 'rgba(14,165,233,0.3)',
+                height:`${v/max*100}%`, transformOrigin:'bottom',
+              }}
             />
           </div>
         ))}
@@ -253,25 +282,35 @@ const FullChart = ({ data }) => {
 };
 
 /* ─── ProgressBar ───────────────────────────────────────────────── */
-const ProgressBar = ({ pct, delay, gradient }) => (
-  <div style={{ height:4, borderRadius:99, background:'var(--surface3)' }}>
-    <div style={{
-      height:'100%', borderRadius:99, width:`${pct}%`,
-      background: gradient || 'linear-gradient(90deg, var(--accent), var(--accent2))',
-      animation:`barGrow 0.7s ${delay}s cubic-bezier(.16,1,.3,1) both`,
-      transformOrigin:'left',
-    }}/>
+const ProgressBar = ({ pct, delay = 0, gradient }) => (
+  <div style={{ height:4, borderRadius:99, background:'var(--surface3)', overflow:'hidden' }}>
+    <motion.div
+      initial={{ scaleX: 0 }}
+      whileInView={{ scaleX: 1 }}
+      viewport={{ once: true }}
+      transition={{ duration: 0.7, delay, ease: EASE }}
+      style={{
+        height:'100%', borderRadius:99, width:`${pct}%`,
+        background: gradient || 'linear-gradient(90deg, var(--accent), var(--accent2))',
+        transformOrigin:'left',
+      }}
+    />
   </div>
 );
 
 /* ─── Navbar ────────────────────────────────────────────────────── */
 const Navbar = ({ screen, setScreen, links, selectedLink, onNavAnalytics }) => (
-  <nav style={{ position:'sticky', top:0, zIndex:100, display:'flex',
-    alignItems:'center', padding:'0 28px', height:56,
-    background:'rgba(7,11,18,0.85)', backdropFilter:'blur(12px)',
-    borderBottom:'1px solid var(--border)' }}>
+  <motion.nav
+    initial={{ y: -56, opacity: 0 }}
+    animate={{ y: 0,   opacity: 1 }}
+    transition={{ duration: 0.4, ease: EASE }}
+    style={{ position:'sticky', top:0, zIndex:100, display:'flex',
+      alignItems:'center', padding:'0 28px', height:56,
+      background:'rgba(7,11,18,0.85)', backdropFilter:'blur(12px)',
+      borderBottom:'1px solid var(--border)' }}>
 
-    <div onClick={() => setScreen('landing')}
+    <motion.div onClick={() => setScreen('landing')}
+      whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }} transition={SPRING}
       style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', marginRight:32 }}>
       <div style={{ width:28, height:28, borderRadius:7,
         background:'linear-gradient(135deg, var(--accent), #7dd3fc)',
@@ -280,55 +319,68 @@ const Navbar = ({ screen, setScreen, links, selectedLink, onNavAnalytics }) => (
       </div>
       <span style={{ fontWeight:700, fontSize:16, letterSpacing:'-0.02em' }}>snip</span>
       <span style={{ fontWeight:300, fontSize:16, color:'var(--text3)', letterSpacing:'-0.01em' }}>.link</span>
-    </div>
+    </motion.div>
 
     {screen !== 'landing' && (
       <div style={{ display:'flex', alignItems:'center', gap:2, flex:1 }}>
         {[['dashboard','Dashboard',<GridIcon size={14}/>],
           ['analytics','Analytics',<ChartIcon size={14}/>]].map(([s,label,icon]) => (
-          <button key={s} onClick={() => s === 'analytics' ? onNavAnalytics() : setScreen(s)} style={{
-            display:'flex', alignItems:'center', gap:6, padding:'6px 12px', borderRadius:8,
-            background: screen===s ? 'var(--surface3)' : 'transparent',
-            color: screen===s ? 'var(--text)' : 'var(--text2)',
-            fontSize:13, fontWeight:500, transition:'all 0.15s',
-            border: screen===s ? '1px solid var(--border)' : '1px solid transparent',
-          }}>{icon}{label}</button>
+          <motion.button key={s}
+            onClick={() => s === 'analytics' ? onNavAnalytics() : setScreen(s)}
+            whileHover={{ background: screen===s ? undefined : 'rgba(255,255,255,0.04)' }}
+            whileTap={{ scale: 0.96 }}
+            transition={{ duration: 0.15 }}
+            style={{
+              display:'flex', alignItems:'center', gap:6, padding:'6px 12px', borderRadius:8,
+              background: screen===s ? 'var(--surface3)' : 'transparent',
+              color: screen===s ? 'var(--text)' : 'var(--text2)',
+              fontSize:13, fontWeight:500,
+              border: screen===s ? '1px solid var(--border)' : '1px solid transparent',
+            }}>{icon}{label}</motion.button>
         ))}
       </div>
     )}
 
     <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:12 }}>
       {screen === 'landing' ? (
-        <button onClick={() => setScreen('dashboard')} style={{
-          display:'flex', alignItems:'center', gap:8, padding:'8px 18px', borderRadius:10,
-          background:'var(--accent)', color:'#fff', fontSize:13, fontWeight:600,
-          transition:'all 0.2s', boxShadow:'0 0 20px var(--accent-glow)',
-        }}
-        onMouseEnter={e => { e.currentTarget.style.background='var(--accent2)'; e.currentTarget.style.transform='translateY(-1px)'; }}
-        onMouseLeave={e => { e.currentTarget.style.background='var(--accent)'; e.currentTarget.style.transform=''; }}>
+        <motion.button onClick={() => setScreen('dashboard')}
+          whileHover={{ y: -2, boxShadow: '0 0 32px var(--accent-glow)' }}
+          whileTap={{ scale: 0.97 }}
+          transition={SPRING}
+          style={{
+            display:'flex', alignItems:'center', gap:8, padding:'8px 18px', borderRadius:10,
+            background:'var(--accent)', color:'#fff', fontSize:13, fontWeight:600,
+            boxShadow:'0 0 20px var(--accent-glow)',
+          }}>
           Open Dashboard <ArrowIcon size={13}/>
-        </button>
+        </motion.button>
       ) : (
         <>
           <div style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 12px',
             background:'var(--surface2)', borderRadius:8, border:'1px solid var(--border)',
             fontSize:12, color:'var(--text2)' }}>
-            <div style={{ width:6, height:6, borderRadius:'50%', background:'var(--green)' }}/>
+            <motion.div
+              animate={{ scale: [1, 1.4, 1] }}
+              transition={{ duration: 2, repeat: Infinity, repeatDelay: 3 }}
+              style={{ width:6, height:6, borderRadius:'50%', background:'var(--green)' }}
+            />
             {links.length} links active
           </div>
-          <button onClick={() => setScreen('landing')} style={{
-            width:32, height:32, borderRadius:8, background:'var(--surface2)',
-            border:'1px solid var(--border)', color:'var(--text2)',
-            display:'flex', alignItems:'center', justifyContent:'center', transition:'all 0.15s',
-          }}
-          onMouseEnter={e => { e.currentTarget.style.background='var(--surface3)'; e.currentTarget.style.color='var(--text)'; }}
-          onMouseLeave={e => { e.currentTarget.style.background='var(--surface2)'; e.currentTarget.style.color='var(--text2)'; }}>
+          <motion.button onClick={() => setScreen('landing')}
+            whileHover={{ background: 'var(--surface3)', color: 'var(--text)' }}
+            whileTap={{ scale: 0.95 }}
+            transition={{ duration: 0.15 }}
+            style={{
+              width:32, height:32, borderRadius:8, background:'var(--surface2)',
+              border:'1px solid var(--border)', color:'var(--text2)',
+              display:'flex', alignItems:'center', justifyContent:'center',
+            }}>
             <LogoutIcon size={14}/>
-          </button>
+          </motion.button>
         </>
       )}
     </div>
-  </nav>
+  </motion.nav>
 );
 
 /* ─── Spinner ───────────────────────────────────────────────────── */
@@ -372,90 +424,128 @@ const Landing = ({ onShorten, setScreen }) => {
         background:'radial-gradient(ellipse, rgba(14,165,233,0.07) 0%, transparent 70%)',
         pointerEvents:'none' }}/>
 
-      <div className="fade-up" style={{ marginBottom:24 }}>
-        <Chip color="accent">&#9889; Blazing fast link shortener</Chip>
-      </div>
+      {/* Hero — staggered reveal */}
+      <motion.div
+        variants={staggerWrap(0.1)}
+        initial="hidden" animate="show"
+        style={{ display:'flex', flexDirection:'column', alignItems:'center', width:'100%', maxWidth:700 }}>
 
-      <h1 className="fade-up-2" style={{
-        fontSize:'clamp(40px,6vw,72px)', fontWeight:700, letterSpacing:'-0.04em',
-        textAlign:'center', lineHeight:1.08, maxWidth:700,
-        background:'linear-gradient(160deg, #e8edf5 30%, #6b90c0)',
-        WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', marginBottom:16,
-      }}>
-        Shorten any link.<br/>Track every click.
-      </h1>
+        <motion.div variants={staggerItem} style={{ marginBottom:24 }}>
+          <Chip color="accent">&#9889; Blazing fast link shortener</Chip>
+        </motion.div>
 
-      <p className="fade-up-3" style={{ fontSize:17, color:'var(--text2)', textAlign:'center',
-        maxWidth:420, lineHeight:1.6, marginBottom:40 }}>
-        Turn long URLs into sharp, trackable links &#8212; with real-time analytics on clicks, referrers, and geography.
-      </p>
+        <motion.h1 variants={staggerItem} style={{
+          fontSize:'clamp(40px,6vw,72px)', fontWeight:700, letterSpacing:'-0.04em',
+          textAlign:'center', lineHeight:1.08,
+          background:'linear-gradient(160deg, #e8edf5 30%, #6b90c0)',
+          WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', marginBottom:16,
+        }}>
+          Shorten any link.<br/>Track every click.
+        </motion.h1>
 
-      <div className="fade-up-4" style={{ width:'100%', maxWidth:580 }}>
-        <div style={{ display:'flex', alignItems:'stretch', background:'var(--surface)',
-          border:'1px solid var(--border)', borderRadius:14, padding:6,
-          boxShadow: result ? '0 0 0 2px var(--accent-glow)' : '0 0 40px rgba(0,0,0,0.4)',
-          transition:'box-shadow 0.3s' }}>
-          <div style={{ display:'flex', alignItems:'center', paddingLeft:12, color:'var(--text3)' }}>
-            <LinkIcon size={16}/>
-          </div>
-          <input value={url} onChange={e => setUrl(e.target.value)}
-            onKeyDown={e => e.key==='Enter' && handleShorten()}
-            placeholder="Paste your long URL here&#8230;"
-            style={{ flex:1, padding:'12px 14px', background:'transparent', border:'none',
-              fontSize:14, color:'var(--text)', caretColor:'var(--accent)' }}/>
-          <button onClick={handleShorten} style={{
-            padding:'10px 22px', borderRadius:10,
-            background: loading ? 'var(--surface3)' : 'var(--accent)',
-            color:'#fff', fontSize:13, fontWeight:600,
-            display:'flex', alignItems:'center', gap:8, transition:'all 0.2s',
-            boxShadow: loading ? 'none' : '0 0 20px var(--accent-glow)',
-          }}>
-            {loading ? <Spinner/> : <><span>Shorten</span><ZapIcon size={13}/></>}
-          </button>
-        </div>
+        <motion.p variants={staggerItem} style={{ fontSize:17, color:'var(--text2)', textAlign:'center',
+          maxWidth:420, lineHeight:1.6, marginBottom:40 }}>
+          Turn long URLs into sharp, trackable links &#8212; with real-time analytics on clicks, referrers, and geography.
+        </motion.p>
 
-        {error && (
-          <div style={{ marginTop:8, padding:'8px 12px', borderRadius:8,
-            background:'rgba(240,93,106,0.1)', border:'1px solid rgba(240,93,106,0.3)',
-            color:'var(--red)', fontSize:13 }}>{error}</div>
-        )}
-
-        {result && (
-          <div style={{ marginTop:12, padding:'14px 16px', background:'var(--surface)',
-            border:'1px solid rgba(14,165,233,0.3)', borderRadius:12,
-            display:'flex', alignItems:'center', gap:12, animation:'fadeUp 0.3s ease' }}>
-            <div style={{ flex:1 }}>
-              <div style={{ fontSize:11, color:'var(--text3)', marginBottom:3, fontWeight:500 }}>YOUR SHORT LINK</div>
-              <div className="mono" style={{ color:'var(--accent)', fontSize:15, fontWeight:600 }}>{result}</div>
+        {/* Input box */}
+        <motion.div variants={staggerItem} style={{ width:'100%', maxWidth:580 }}>
+          <motion.div
+            animate={{ boxShadow: result ? '0 0 0 2px rgba(14,165,233,0.35)' : '0 0 40px rgba(0,0,0,0.4)' }}
+            transition={{ duration: 0.3 }}
+            style={{ display:'flex', alignItems:'stretch', background:'var(--surface)',
+              border:'1px solid var(--border)', borderRadius:14, padding:6 }}>
+            <div style={{ display:'flex', alignItems:'center', paddingLeft:12, color:'var(--text3)' }}>
+              <LinkIcon size={16}/>
             </div>
-            <button onClick={handleCopy} style={{
-              display:'flex', alignItems:'center', gap:6, padding:'7px 14px', borderRadius:8,
-              background: copied ? 'rgba(16,217,160,0.15)' : 'var(--accent-dim)',
-              color: copied ? 'var(--green)' : 'var(--accent)',
-              border:`1px solid ${copied ? 'rgba(16,217,160,0.3)' : 'rgba(14,165,233,0.25)'}`,
-              fontSize:12, fontWeight:600, transition:'all 0.2s',
-            }}>
-              {copied ? <CheckIcon size={13}/> : <CopyIcon size={13}/>}
-              {copied ? 'Copied!' : 'Copy'}
-            </button>
-            <button onClick={() => setScreen('dashboard')} style={{
-              display:'flex', alignItems:'center', gap:6, padding:'7px 14px', borderRadius:8,
-              background:'var(--surface2)', border:'1px solid var(--border)',
-              color:'var(--text2)', fontSize:12, fontWeight:600,
-            }}>
-              View all <ArrowIcon size={12}/>
-            </button>
-          </div>
-        )}
-      </div>
+            <input value={url} onChange={e => setUrl(e.target.value)}
+              onKeyDown={e => e.key==='Enter' && handleShorten()}
+              placeholder="Paste your long URL here&#8230;"
+              style={{ flex:1, padding:'12px 14px', background:'transparent', border:'none',
+                fontSize:14, color:'var(--text)', caretColor:'var(--accent)' }}/>
+            <motion.button onClick={handleShorten}
+              whileHover={loading ? {} : { scale: 1.03, boxShadow: '0 0 32px var(--accent-glow)' }}
+              whileTap={{ scale: 0.96 }}
+              transition={SPRING}
+              style={{
+                padding:'10px 22px', borderRadius:10,
+                background: loading ? 'var(--surface3)' : 'var(--accent)',
+                color:'#fff', fontSize:13, fontWeight:600,
+                display:'flex', alignItems:'center', gap:8,
+                boxShadow: loading ? 'none' : '0 0 20px var(--accent-glow)',
+              }}>
+              {loading ? <Spinner/> : <><span>Shorten</span><ZapIcon size={13}/></>}
+            </motion.button>
+          </motion.div>
 
-      <div style={{ marginTop:72, display:'flex', gap:48, justifyContent:'center', flexWrap:'wrap' }}>
+          <AnimatePresence>
+            {error && (
+              <motion.div
+                initial={{ opacity: 0, y: -6, height: 0 }}
+                animate={{ opacity: 1, y: 0, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.25 }}
+                style={{ marginTop:8, padding:'8px 12px', borderRadius:8,
+                  background:'rgba(240,93,106,0.1)', border:'1px solid rgba(240,93,106,0.3)',
+                  color:'var(--red)', fontSize:13 }}>{error}
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <AnimatePresence>
+            {result && (
+              <motion.div
+                initial={{ opacity: 0, y: 10, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0,  scale: 1 }}
+                exit={{ opacity: 0, y: -6 }}
+                transition={{ duration: 0.3, ease: EASE }}
+                style={{ marginTop:12, padding:'14px 16px', background:'var(--surface)',
+                  border:'1px solid rgba(14,165,233,0.3)', borderRadius:12,
+                  display:'flex', alignItems:'center', gap:12 }}>
+                <div style={{ flex:1 }}>
+                  <div style={{ fontSize:11, color:'var(--text3)', marginBottom:3, fontWeight:500 }}>YOUR SHORT LINK</div>
+                  <div className="mono" style={{ color:'var(--accent)', fontSize:15, fontWeight:600 }}>{result}</div>
+                </div>
+                <motion.button onClick={handleCopy}
+                  whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} transition={SPRING}
+                  style={{
+                    display:'flex', alignItems:'center', gap:6, padding:'7px 14px', borderRadius:8,
+                    background: copied ? 'rgba(16,217,160,0.15)' : 'var(--accent-dim)',
+                    color: copied ? 'var(--green)' : 'var(--accent)',
+                    border:`1px solid ${copied ? 'rgba(16,217,160,0.3)' : 'rgba(14,165,233,0.25)'}`,
+                    fontSize:12, fontWeight:600, transition:'background 0.2s, color 0.2s, border-color 0.2s',
+                  }}>
+                  {copied ? <CheckIcon size={13}/> : <CopyIcon size={13}/>}
+                  {copied ? 'Copied!' : 'Copy'}
+                </motion.button>
+                <motion.button onClick={() => setScreen('dashboard')}
+                  whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.95 }} transition={SPRING}
+                  style={{
+                    display:'flex', alignItems:'center', gap:6, padding:'7px 14px', borderRadius:8,
+                    background:'var(--surface2)', border:'1px solid var(--border)',
+                    color:'var(--text2)', fontSize:12, fontWeight:600,
+                  }}>
+                  View all <ArrowIcon size={12}/>
+                </motion.button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </motion.div>
+      </motion.div>
+
+      {/* Stats row — scroll triggered stagger */}
+      <motion.div
+        variants={staggerWrap(0.12)}
+        initial="hidden"
+        whileInView="show"
+        viewport={{ once: true, margin: '-60px' }}
+        style={{ marginTop:72, display:'flex', gap:48, justifyContent:'center', flexWrap:'wrap' }}>
         {[['28.4M','Links shortened','↑ 12% this month'],
           ['1.2B','Clicks tracked',null],
           ['190+','Countries reached',null]].map(([v,l,s],i) => (
-          <Stat key={i} value={v} label={l} sub={s} delay={`${i*0.1}s`}/>
+          <Stat key={i} value={v} label={l} sub={s}/>
         ))}
-      </div>
+      </motion.div>
     </div>
   );
 };
@@ -471,14 +561,30 @@ const LinkRow = ({ link, onView, onDelete }) => {
     setCopied(true); setTimeout(() => setCopied(false), 2000);
   };
 
+  const iconBtn = (onClick, title, children, hoverStyle) => (
+    <motion.button onClick={onClick} title={title}
+      whileHover={{ scale: 1.12, ...hoverStyle }}
+      whileTap={{ scale: 0.88 }}
+      transition={SPRING}
+      style={{
+        width:32, height:32, borderRadius:8, background:'var(--surface2)',
+        border:'1px solid var(--border)', color:'var(--text3)',
+        display:'flex', alignItems:'center', justifyContent:'center',
+      }}>
+      {children}
+    </motion.button>
+  );
+
   return (
-    <div onClick={() => onView(link)}
+    <motion.div
+      onClick={() => onView(link)}
+      whileHover={{ y: -2, borderColor: 'var(--border2)', background: 'var(--surface2)' }}
+      whileTap={{ scale: 0.995 }}
+      transition={{ duration: 0.18, ease: 'easeOut' }}
       style={{ display:'grid', gridTemplateColumns:'1fr auto auto auto',
         alignItems:'center', gap:16, padding:'16px 20px', borderRadius:12,
         background:'var(--surface)', border:'1px solid var(--border)',
-        cursor:'pointer', transition:'all 0.18s' }}
-      onMouseEnter={e => { e.currentTarget.style.background='var(--surface2)'; e.currentTarget.style.borderColor='var(--border2)'; }}
-      onMouseLeave={e => { e.currentTarget.style.background='var(--surface)'; e.currentTarget.style.borderColor='var(--border)'; }}>
+        cursor:'pointer' }}>
 
       <div style={{ minWidth:0 }}>
         <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:5 }}>
@@ -503,35 +609,48 @@ const LinkRow = ({ link, onView, onDelete }) => {
       </div>
 
       <div style={{ display:'flex', gap:6 }} onClick={e => e.stopPropagation()}>
-        <button onClick={handleCopy} style={{
-          width:32, height:32, borderRadius:8,
-          background: copied ? 'rgba(16,217,160,0.12)' : 'var(--surface2)',
-          border:`1px solid ${copied ? 'rgba(16,217,160,0.3)' : 'var(--border)'}`,
-          color: copied ? 'var(--green)' : 'var(--text2)',
-          display:'flex', alignItems:'center', justifyContent:'center', transition:'all 0.18s',
-        }}>
+        {/* Copy */}
+        <motion.button onClick={handleCopy}
+          whileHover={{ scale: 1.12 }} whileTap={{ scale: 0.88 }} transition={SPRING}
+          style={{
+            width:32, height:32, borderRadius:8,
+            background: copied ? 'rgba(16,217,160,0.12)' : 'var(--surface2)',
+            border:`1px solid ${copied ? 'rgba(16,217,160,0.3)' : 'var(--border)'}`,
+            color: copied ? 'var(--green)' : 'var(--text2)',
+            display:'flex', alignItems:'center', justifyContent:'center',
+            transition:'background 0.18s, color 0.18s, border-color 0.18s',
+          }}>
           {copied ? <CheckIcon size={13}/> : <CopyIcon size={13}/>}
-        </button>
-        <button onClick={e => { e.stopPropagation(); window.open(link.longUrl, '_blank', 'noopener,noreferrer'); }} title="Open original URL" style={{
-          width:32, height:32, borderRadius:8, background:'var(--surface2)',
-          border:'1px solid var(--border)', color:'var(--text3)',
-          display:'flex', alignItems:'center', justifyContent:'center', transition:'all 0.18s',
-        }}
-        onMouseEnter={e => { e.currentTarget.style.background='var(--accent-dim)'; e.currentTarget.style.color='var(--accent)'; e.currentTarget.style.borderColor='rgba(14,165,233,0.3)'; }}
-        onMouseLeave={e => { e.currentTarget.style.background='var(--surface2)'; e.currentTarget.style.color='var(--text3)'; e.currentTarget.style.borderColor='var(--border)'; }}>
+        </motion.button>
+        {/* Open original */}
+        <motion.button
+          onClick={e => { e.stopPropagation(); window.open(link.longUrl, '_blank', 'noopener,noreferrer'); }}
+          title="Open original URL"
+          whileHover={{ scale: 1.12, background: 'var(--accent-dim)', color: 'var(--accent)' }}
+          whileTap={{ scale: 0.88 }}
+          transition={SPRING}
+          style={{
+            width:32, height:32, borderRadius:8, background:'var(--surface2)',
+            border:'1px solid var(--border)', color:'var(--text3)',
+            display:'flex', alignItems:'center', justifyContent:'center',
+          }}>
           <ExternalIcon size={13}/>
-        </button>
-        <button onClick={e => { e.stopPropagation(); onDelete(link.shortCode); }} style={{
-          width:32, height:32, borderRadius:8, background:'var(--surface2)',
-          border:'1px solid var(--border)', color:'var(--text3)',
-          display:'flex', alignItems:'center', justifyContent:'center', transition:'all 0.18s',
-        }}
-        onMouseEnter={e => { e.currentTarget.style.background='rgba(240,93,106,0.1)'; e.currentTarget.style.color='var(--red)'; e.currentTarget.style.borderColor='rgba(240,93,106,0.3)'; }}
-        onMouseLeave={e => { e.currentTarget.style.background='var(--surface2)'; e.currentTarget.style.color='var(--text3)'; e.currentTarget.style.borderColor='var(--border)'; }}>
+        </motion.button>
+        {/* Delete */}
+        <motion.button
+          onClick={e => { e.stopPropagation(); onDelete(link.shortCode); }}
+          whileHover={{ scale: 1.12, background: 'rgba(240,93,106,0.1)', color: 'var(--red)' }}
+          whileTap={{ scale: 0.88 }}
+          transition={SPRING}
+          style={{
+            width:32, height:32, borderRadius:8, background:'var(--surface2)',
+            border:'1px solid var(--border)', color:'var(--text3)',
+            display:'flex', alignItems:'center', justifyContent:'center',
+          }}>
           <TrashIcon size={13}/>
-        </button>
+        </motion.button>
       </div>
-    </div>
+    </motion.div>
   );
 };
 
@@ -547,15 +666,11 @@ const Dashboard = ({ links, setLinks, onView }) => {
   const [lookupError, setLookupError] = useState('');
   const [lookupLoading, setLookupLoading] = useState(false);
 
-  // Load all links from backend on first mount
   useEffect(() => {
     setFetching(true);
     API.fetchAll()
-      .then(data => {
-        const enriched = data.map(enrichLink);
-        setLinks(enriched);
-      })
-      .catch(() => {}) // silently fail — in-memory store may be empty
+      .then(data => setLinks(data.map(enrichLink)))
+      .catch(() => {})
       .finally(() => setFetching(false));
   }, []); // eslint-disable-line
 
@@ -578,11 +693,8 @@ const Dashboard = ({ links, setLinks, onView }) => {
       const link = enrichLink(data);
       setLookupResult(link);
       setLinks(p => upsertLink(p, link));
-    } catch (e) {
-      setLookupError('Short URL not found');
-    } finally {
-      setLookupLoading(false);
-    }
+    } catch { setLookupError('Short URL not found'); }
+    finally { setLookupLoading(false); }
   };
 
   const handleDelete = async (code) => {
@@ -597,27 +709,36 @@ const Dashboard = ({ links, setLinks, onView }) => {
 
   return (
     <div style={{ maxWidth:900, margin:'0 auto', padding:'36px 24px' }}>
-      {/* KPI */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:16, marginBottom:28 }}>
+
+      {/* KPI cards — staggered */}
+      <motion.div
+        variants={staggerWrap(0.09)}
+        initial="hidden" animate="show"
+        style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:16, marginBottom:28 }}>
         {[
           { label:'Total Links',  value: links.length,                icon:<LinkIcon  size={16}/>, color:'var(--accent)' },
           { label:'Total Clicks', value: totalClicks.toLocaleString(), icon:<ChartIcon size={16}/>, color:'var(--green)' },
           { label:'Avg. CTR',     value: '3.2%',                      icon:<ZapIcon   size={16}/>, color:'var(--yellow)' },
         ].map((s, i) => (
-          <div key={i} className="fade-up" style={{ animationDelay:`${i*0.08}s`,
-            padding:'20px 22px', borderRadius:14,
-            background:'var(--surface)', border:'1px solid var(--border)' }}>
+          <motion.div key={i} variants={staggerItem}
+            whileHover={{ y: -3, borderColor: 'var(--border2)' }}
+            transition={{ duration: 0.18 }}
+            style={{ padding:'20px 22px', borderRadius:14,
+              background:'var(--surface)', border:'1px solid var(--border)' }}>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
               <span style={{ fontSize:12, color:'var(--text2)', fontWeight:500 }}>{s.label}</span>
               <span style={{ color:s.color, opacity:0.8 }}>{s.icon}</span>
             </div>
             <div style={{ fontSize:26, fontWeight:700, letterSpacing:'-0.02em' }}>{s.value}</div>
-          </div>
+          </motion.div>
         ))}
-      </div>
+      </motion.div>
 
       {/* Quick add + search */}
-      <div className="fade-up" style={{ marginBottom:20, display:'flex', gap:8 }}>
+      <motion.div
+        initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, delay: 0.28, ease: EASE }}
+        style={{ marginBottom:20, display:'flex', gap:8 }}>
         <div style={{ flex:1, display:'flex', alignItems:'center', gap:8,
           background:'var(--surface)', border:'1px solid var(--border)', borderRadius:10, padding:'0 14px' }}>
           <LinkIcon size={14} stroke="var(--text3)"/>
@@ -627,13 +748,16 @@ const Dashboard = ({ links, setLinks, onView }) => {
             style={{ flex:1, padding:'11px 0', background:'transparent', border:'none',
               fontSize:13, color:'var(--text)', caretColor:'var(--accent)' }}/>
         </div>
-        <button onClick={handleShorten} style={{
-          display:'flex', alignItems:'center', gap:6, padding:'0 18px', borderRadius:10,
-          background:'var(--accent)', color:'#fff', fontSize:13, fontWeight:600,
-          boxShadow:'0 0 20px var(--accent-glow)', transition:'all 0.2s',
-        }}>
+        <motion.button onClick={handleShorten}
+          whileHover={{ scale: 1.03, boxShadow: '0 0 28px var(--accent-glow)' }}
+          whileTap={{ scale: 0.96 }} transition={SPRING}
+          style={{
+            display:'flex', alignItems:'center', gap:6, padding:'0 18px', borderRadius:10,
+            background:'var(--accent)', color:'#fff', fontSize:13, fontWeight:600,
+            boxShadow:'0 0 20px var(--accent-glow)',
+          }}>
           {loading ? <Spinner/> : <><PlusIcon size={14}/> Add</>}
-        </button>
+        </motion.button>
         <div style={{ display:'flex', alignItems:'center', gap:8,
           background:'var(--surface)', border:'1px solid var(--border)', borderRadius:10, padding:'0 14px' }}>
           <SearchIcon size={14} stroke="var(--text3)"/>
@@ -642,16 +766,26 @@ const Dashboard = ({ links, setLinks, onView }) => {
             style={{ width:140, padding:'11px 0', background:'transparent', border:'none',
               fontSize:13, color:'var(--text)', caretColor:'var(--accent)' }}/>
         </div>
-      </div>
+      </motion.div>
 
-      {error && (
-        <div style={{ marginBottom:12, padding:'8px 12px', borderRadius:8,
-          background:'rgba(240,93,106,0.1)', border:'1px solid rgba(240,93,106,0.3)',
-          color:'var(--red)', fontSize:13 }}>{error}</div>
-      )}
+      <AnimatePresence>
+        {error && (
+          <motion.div
+            initial={{ opacity:0, height:0 }} animate={{ opacity:1, height:'auto' }}
+            exit={{ opacity:0, height:0 }} transition={{ duration: 0.25 }}
+            style={{ marginBottom:12, padding:'8px 12px', borderRadius:8,
+              background:'rgba(240,93,106,0.1)', border:'1px solid rgba(240,93,106,0.3)',
+              color:'var(--red)', fontSize:13 }}>{error}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      <div className="fade-up" style={{ marginBottom:20, padding:16, borderRadius:12,
-        background:'var(--surface)', border:'1px solid var(--border)' }}>
+      {/* Lookup widget */}
+      <motion.div
+        initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, delay: 0.36, ease: EASE }}
+        style={{ marginBottom:20, padding:16, borderRadius:12,
+          background:'var(--surface)', border:'1px solid var(--border)' }}>
         <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12 }}>
           <ExternalIcon size={14} stroke="var(--accent)"/>
           <div style={{ fontSize:13, fontWeight:600 }}>Find original URL</div>
@@ -666,68 +800,94 @@ const Dashboard = ({ links, setLinks, onView }) => {
               style={{ flex:1, padding:'11px 0', background:'transparent', border:'none',
                 fontSize:13, color:'var(--text)', caretColor:'var(--accent)' }}/>
           </div>
-          <button onClick={handleLookup} style={{
-            display:'flex', alignItems:'center', gap:6, padding:'0 16px', borderRadius:10,
-            background:'var(--surface3)', border:'1px solid var(--border2)',
-            color:'var(--text)', fontSize:13, fontWeight:600,
-          }}>
-            {lookupLoading ? <Spinner/> : <><SearchIcon size={13}/> Lookup</>}
-          </button>
-        </div>
-        {lookupError && (
-          <div style={{ marginTop:10, fontSize:12, color:'var(--red)' }}>{lookupError}</div>
-        )}
-        {lookupResult && (
-          <div style={{ marginTop:12, display:'grid', gridTemplateColumns:'auto 1fr auto auto', gap:10,
-            alignItems:'center', padding:'10px 12px', borderRadius:10,
-            background:'var(--surface2)', border:'1px solid var(--border)' }}>
-            <LinkIcon size={14} stroke="var(--accent)"/>
-            <div style={{ minWidth:0 }}>
-              <div className="mono" style={{ fontSize:12, color:'var(--accent)', marginBottom:3 }}>
-                snip.link/{lookupResult.shortCode}
-              </div>
-              <div style={{ fontSize:13, color:'var(--text)', overflow:'hidden',
-                textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{lookupResult.longUrl}</div>
-            </div>
-            <a href={`/${lookupResult.shortCode}`} target="_blank" rel="noopener noreferrer"
-              style={{
-                display:'flex', alignItems:'center', gap:6, padding:'7px 12px', borderRadius:8,
-                background:'var(--surface3)', border:'1px solid var(--border2)',
-                color:'var(--text2)', fontSize:12, fontWeight:600, textDecoration:'none',
-              }}>
-              Open <ExternalIcon size={12}/>
-            </a>
-            <button onClick={() => onView(lookupResult)} style={{
-              display:'flex', alignItems:'center', gap:6, padding:'7px 12px', borderRadius:8,
-              background:'var(--accent-dim)', border:'1px solid rgba(14,165,233,0.25)',
-              color:'var(--accent)', fontSize:12, fontWeight:600,
+          <motion.button onClick={handleLookup}
+            whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.96 }} transition={SPRING}
+            style={{
+              display:'flex', alignItems:'center', gap:6, padding:'0 16px', borderRadius:10,
+              background:'var(--surface3)', border:'1px solid var(--border2)',
+              color:'var(--text)', fontSize:13, fontWeight:600,
             }}>
-              Stats <ArrowIcon size={12}/>
-            </button>
-          </div>
-        )}
-      </div>
+            {lookupLoading ? <Spinner/> : <><SearchIcon size={13}/> Lookup</>}
+          </motion.button>
+        </div>
+        <AnimatePresence>
+          {lookupError && (
+            <motion.div
+              initial={{ opacity:0, y:-4 }} animate={{ opacity:1, y:0 }}
+              exit={{ opacity:0 }} transition={{ duration:0.2 }}
+              style={{ marginTop:10, fontSize:12, color:'var(--red)' }}>{lookupError}
+            </motion.div>
+          )}
+        </AnimatePresence>
+        <AnimatePresence>
+          {lookupResult && (
+            <motion.div
+              initial={{ opacity:0, y:8, scale:0.98 }} animate={{ opacity:1, y:0, scale:1 }}
+              exit={{ opacity:0, height:0 }} transition={{ duration:0.3, ease:EASE }}
+              style={{ marginTop:12, display:'grid', gridTemplateColumns:'auto 1fr auto auto', gap:10,
+                alignItems:'center', padding:'10px 12px', borderRadius:10,
+                background:'var(--surface2)', border:'1px solid var(--border)' }}>
+              <LinkIcon size={14} stroke="var(--accent)"/>
+              <div style={{ minWidth:0 }}>
+                <div className="mono" style={{ fontSize:12, color:'var(--accent)', marginBottom:3 }}>
+                  snip.link/{lookupResult.shortCode}
+                </div>
+                <div style={{ fontSize:13, color:'var(--text)', overflow:'hidden',
+                  textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{lookupResult.longUrl}</div>
+              </div>
+              <motion.a href={`/${lookupResult.shortCode}`} target="_blank" rel="noopener noreferrer"
+                whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} transition={SPRING}
+                style={{
+                  display:'flex', alignItems:'center', gap:6, padding:'7px 12px', borderRadius:8,
+                  background:'var(--surface3)', border:'1px solid var(--border2)',
+                  color:'var(--text2)', fontSize:12, fontWeight:600, textDecoration:'none',
+                }}>
+                Open <ExternalIcon size={12}/>
+              </motion.a>
+              <motion.button onClick={() => onView(lookupResult)}
+                whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} transition={SPRING}
+                style={{
+                  display:'flex', alignItems:'center', gap:6, padding:'7px 12px', borderRadius:8,
+                  background:'var(--accent-dim)', border:'1px solid rgba(14,165,233,0.25)',
+                  color:'var(--accent)', fontSize:12, fontWeight:600,
+                }}>
+                Stats <ArrowIcon size={12}/>
+              </motion.button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </motion.div>
 
-      {/* Link list */}
+      {/* Link list with AnimatePresence */}
       <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
         {fetching ? (
           [0,1,2].map(i => (
-            <div key={i} style={{ height:72, borderRadius:12, background:'var(--surface)',
-              border:'1px solid var(--border)', opacity: 0.5 - i*0.1 }}/>
+            <motion.div key={i}
+              initial={{ opacity: 0.5 - i*0.1 }}
+              animate={{ opacity: [0.5 - i*0.1, 0.2, 0.5 - i*0.1] }}
+              transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
+              style={{ height:72, borderRadius:12, background:'var(--surface)', border:'1px solid var(--border)' }}
+            />
           ))
         ) : (
-          <>
-            {filtered.map((link, i) => (
-              <div key={link.shortCode} className="fade-up" style={{ animationDelay:`${i*0.05}s` }}>
+          <AnimatePresence initial={false}>
+            {filtered.map((link) => (
+              <motion.div key={link.shortCode}
+                variants={listItem}
+                initial="hidden" animate="show" exit="exit"
+                layout
+                transition={{ duration: 0.3, ease: EASE }}>
                 <LinkRow link={link} onView={onView} onDelete={handleDelete}/>
-              </div>
+              </motion.div>
             ))}
-            {filtered.length === 0 && (
-              <div style={{ textAlign:'center', padding:'48px 0', color:'var(--text3)', fontSize:14 }}>
-                No links found. Add one above.
-              </div>
-            )}
-          </>
+          </AnimatePresence>
+        )}
+        {!fetching && filtered.length === 0 && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.4 }}
+            style={{ textAlign:'center', padding:'48px 0', color:'var(--text3)', fontSize:14 }}>
+            No links found. Add one above.
+          </motion.div>
         )}
       </div>
     </div>
@@ -762,17 +922,22 @@ const Analytics = ({ link, onBack }) => {
 
   return (
     <div style={{ maxWidth:900, margin:'0 auto', padding:'36px 24px' }}>
+
       {/* Header */}
-      <div className="fade-up" style={{ display:'flex', alignItems:'center', gap:12, marginBottom:28 }}>
-        <button onClick={onBack} style={{
-          display:'flex', alignItems:'center', gap:6, padding:'7px 12px', borderRadius:8,
-          background:'var(--surface)', border:'1px solid var(--border)',
-          color:'var(--text2)', fontSize:12, fontWeight:500, transition:'all 0.15s',
-        }}
-        onMouseEnter={e => e.currentTarget.style.color='var(--text)'}
-        onMouseLeave={e => e.currentTarget.style.color='var(--text2)'}>
+      <motion.div
+        initial={{ opacity:0, y:16 }} animate={{ opacity:1, y:0 }}
+        transition={{ duration:0.4, ease:EASE }}
+        style={{ display:'flex', alignItems:'center', gap:12, marginBottom:28 }}>
+        <motion.button onClick={onBack}
+          whileHover={{ x: -2, color: 'var(--text)' }}
+          whileTap={{ scale: 0.95 }} transition={SPRING}
+          style={{
+            display:'flex', alignItems:'center', gap:6, padding:'7px 12px', borderRadius:8,
+            background:'var(--surface)', border:'1px solid var(--border)',
+            color:'var(--text2)', fontSize:12, fontWeight:500,
+          }}>
           <BackIcon size={14}/> Back
-        </button>
+        </motion.button>
 
         <div style={{ flex:1, minWidth:0 }}>
           <div style={{ display:'flex', alignItems:'center', gap:8 }}>
@@ -785,44 +950,61 @@ const Analytics = ({ link, onBack }) => {
             overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{link.longUrl}</div>
         </div>
 
-        <button onClick={fetchStats} style={{
-          display:'flex', alignItems:'center', gap:6, padding:'8px 14px', borderRadius:9,
-          background:'var(--surface)', border:'1px solid var(--border)',
-          color:'var(--text2)', fontSize:13, fontWeight:600, transition:'all 0.2s',
-        }}>
-          {refreshing ? <Spinner/> : '↻'} Refresh
-        </button>
-        <button onClick={handleCopy} style={{
-          display:'flex', alignItems:'center', gap:6, padding:'8px 14px', borderRadius:9,
-          background: copied ? 'rgba(16,217,160,0.1)' : 'var(--accent-dim)',
-          color: copied ? 'var(--green)' : 'var(--accent)',
-          border:`1px solid ${copied ? 'rgba(16,217,160,0.3)' : 'rgba(14,165,233,0.25)'}`,
-          fontSize:13, fontWeight:600, transition:'all 0.2s',
-        }}>
+        <motion.button onClick={fetchStats}
+          whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.95 }} transition={SPRING}
+          style={{
+            display:'flex', alignItems:'center', gap:6, padding:'8px 14px', borderRadius:9,
+            background:'var(--surface)', border:'1px solid var(--border)',
+            color:'var(--text2)', fontSize:13, fontWeight:600,
+          }}>
+          <motion.span animate={refreshing ? { rotate: 360 } : { rotate: 0 }}
+            transition={{ duration: 0.6, ease: 'linear', repeat: refreshing ? Infinity : 0 }}
+            style={{ display:'inline-block' }}>↻</motion.span> Refresh
+        </motion.button>
+
+        <motion.button onClick={handleCopy}
+          whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.95 }} transition={SPRING}
+          style={{
+            display:'flex', alignItems:'center', gap:6, padding:'8px 14px', borderRadius:9,
+            background: copied ? 'rgba(16,217,160,0.1)' : 'var(--accent-dim)',
+            color: copied ? 'var(--green)' : 'var(--accent)',
+            border:`1px solid ${copied ? 'rgba(16,217,160,0.3)' : 'rgba(14,165,233,0.25)'}`,
+            fontSize:13, fontWeight:600, transition:'background 0.2s, color 0.2s, border-color 0.2s',
+          }}>
           {copied ? <CheckIcon size={13}/> : <CopyIcon size={13}/>}
           {' '}{copied ? 'Copied!' : 'Copy link'}
-        </button>
-        <button onClick={() => window.open(link.longUrl, '_blank', 'noopener,noreferrer')} title="Open original URL" style={{
-          display:'flex', alignItems:'center', gap:6, padding:'8px 14px', borderRadius:9,
-          background:'var(--surface)', border:'1px solid var(--border)',
-          color:'var(--text2)', fontSize:13, fontWeight:600, transition:'all 0.2s',
-        }}
-        onMouseEnter={e => { e.currentTarget.style.background='var(--accent-dim)'; e.currentTarget.style.color='var(--accent)'; e.currentTarget.style.borderColor='rgba(14,165,233,0.3)'; }}
-        onMouseLeave={e => { e.currentTarget.style.background='var(--surface)'; e.currentTarget.style.color='var(--text2)'; e.currentTarget.style.borderColor='var(--border)'; }}>
-          <ExternalIcon size={13}/> Open URL
-        </button>
-      </div>
+        </motion.button>
 
-      {/* KPI row */}
-      <div className="fade-up-2" style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12, marginBottom:20 }}>
+        <motion.button
+          onClick={() => window.open(link.longUrl, '_blank', 'noopener,noreferrer')}
+          title="Open original URL"
+          whileHover={{ scale: 1.04, background: 'var(--accent-dim)', color: 'var(--accent)' }}
+          whileTap={{ scale: 0.95 }} transition={SPRING}
+          style={{
+            display:'flex', alignItems:'center', gap:6, padding:'8px 14px', borderRadius:9,
+            background:'var(--surface)', border:'1px solid var(--border)',
+            color:'var(--text2)', fontSize:13, fontWeight:600,
+          }}>
+          <ExternalIcon size={13}/> Open URL
+        </motion.button>
+      </motion.div>
+
+      {/* KPI row — staggered */}
+      <motion.div
+        variants={staggerWrap(0.08)}
+        initial="hidden" animate="show"
+        style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12, marginBottom:20 }}>
         {[
           { label:'Total Clicks', value: clickCount.toLocaleString(), color:'var(--accent)' },
           { label:'Avg / Day',    value: avgPerDay,                    color:'var(--text)' },
           { label:'Peak Day',     value: peakDay,                      color:'var(--green)' },
           { label:'Created',      value: (link.createdAt||'').slice(0,10) || '&#8212;', color:'var(--text)' },
         ].map((k, i) => (
-          <div key={i} style={{ padding:'18px 20px', borderRadius:12,
-            background:'var(--surface)', border:'1px solid var(--border)' }}>
+          <motion.div key={i} variants={staggerItem}
+            whileHover={{ y: -3, borderColor: 'var(--border2)' }}
+            transition={{ duration: 0.18 }}
+            style={{ padding:'18px 20px', borderRadius:12,
+              background:'var(--surface)', border:'1px solid var(--border)' }}>
             <div style={{ fontSize:11, color:'var(--text2)', marginBottom:8, fontWeight:500 }}>{k.label}</div>
             <div className={k.label==='Created' ? 'mono' : ''} style={{
               fontSize: k.label==='Created' ? 13 : 24, fontWeight:700,
@@ -830,13 +1012,16 @@ const Analytics = ({ link, onBack }) => {
               dangerouslySetInnerHTML={k.label==='Created' ? {__html:k.value} : undefined}>
               {k.label!=='Created' ? k.value : undefined}
             </div>
-          </div>
+          </motion.div>
         ))}
-      </div>
+      </motion.div>
 
       {/* Bar chart */}
-      <div className="fade-up-3" style={{ padding:24, borderRadius:14,
-        background:'var(--surface)', border:'1px solid var(--border)', marginBottom:20 }}>
+      <motion.div
+        initial={{ opacity:0, y:20 }} animate={{ opacity:1, y:0 }}
+        transition={{ duration:0.5, delay:0.32, ease:EASE }}
+        style={{ padding:24, borderRadius:14,
+          background:'var(--surface)', border:'1px solid var(--border)', marginBottom:20 }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:20 }}>
           <div>
             <div style={{ fontWeight:600, fontSize:15 }}>Clicks over time</div>
@@ -845,11 +1030,18 @@ const Analytics = ({ link, onBack }) => {
           <Chip color="accent">{clickCount.toLocaleString()} total</Chip>
         </div>
         <FullChart data={daily}/>
-      </div>
+      </motion.div>
 
-      {/* Referrers + Geo */}
-      <div className="fade-up-4" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
-        <div style={{ padding:24, borderRadius:14, background:'var(--surface)', border:'1px solid var(--border)' }}>
+      {/* Referrers + Geo — scroll triggered */}
+      <motion.div
+        variants={staggerWrap(0.12)}
+        initial="hidden"
+        whileInView="show"
+        viewport={{ once: true, margin: '-60px' }}
+        style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
+
+        <motion.div variants={staggerItem}
+          style={{ padding:24, borderRadius:14, background:'var(--surface)', border:'1px solid var(--border)' }}>
           <div style={{ fontWeight:600, fontSize:15, marginBottom:4 }}>Referrers</div>
           <div style={{ fontSize:12, color:'var(--text2)', marginBottom:20 }}>Where clicks are coming from</div>
           <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
@@ -859,13 +1051,14 @@ const Analytics = ({ link, onBack }) => {
                   <span style={{ fontSize:13 }}>{r.source}</span>
                   <span style={{ fontSize:12, color:'var(--text2)', fontFamily:'var(--mono)' }}>{r.pct}%</span>
                 </div>
-                <ProgressBar pct={r.pct} delay={i*0.08}/>
+                <ProgressBar pct={r.pct} delay={i * 0.08}/>
               </div>
             ))}
           </div>
-        </div>
+        </motion.div>
 
-        <div style={{ padding:24, borderRadius:14, background:'var(--surface)', border:'1px solid var(--border)' }}>
+        <motion.div variants={staggerItem}
+          style={{ padding:24, borderRadius:14, background:'var(--surface)', border:'1px solid var(--border)' }}>
           <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
             <GlobeIcon size={15}/>
             <span style={{ fontWeight:600, fontSize:15 }}>Geography</span>
@@ -880,14 +1073,14 @@ const Analytics = ({ link, onBack }) => {
                     <span style={{ fontSize:12 }}>{g.country}</span>
                     <span style={{ fontSize:12, color:'var(--text2)', fontFamily:'var(--mono)' }}>{g.pct}%</span>
                   </div>
-                  <ProgressBar pct={g.pct} delay={i*0.08}
+                  <ProgressBar pct={g.pct} delay={i * 0.08}
                     gradient="linear-gradient(90deg, rgba(14,165,233,0.5), rgba(56,189,248,0.8))"/>
                 </div>
               </div>
             ))}
           </div>
-        </div>
-      </div>
+        </motion.div>
+      </motion.div>
     </div>
   );
 };
@@ -899,8 +1092,7 @@ const App = () => {
   const [selectedLink, setSelectedLink] = useState(null);
 
   const handleShorten = (data) => {
-    const link = enrichLink(data);
-    setLinks(p => upsertLink(p, link));
+    setLinks(p => upsertLink(p, enrichLink(data)));
   };
 
   const handleView = (link) => {
@@ -908,7 +1100,6 @@ const App = () => {
     setScreen('analytics');
   };
 
-  // Analytics nav button: go to analytics only if a link is selected, else go to dashboard
   const handleNavAnalytics = () => {
     if (selectedLink) setScreen('analytics');
     else setScreen('dashboard');
@@ -918,11 +1109,23 @@ const App = () => {
     <>
       <Navbar screen={screen} setScreen={setScreen} links={links}
         selectedLink={selectedLink} onNavAnalytics={handleNavAnalytics}/>
-      {screen === 'landing'   && <Landing   onShorten={handleShorten} setScreen={setScreen}/>}
-      {screen === 'dashboard' && <Dashboard links={links} setLinks={setLinks} onView={handleView}/>}
-      {screen === 'analytics' && selectedLink && (
-        <Analytics link={selectedLink} onBack={() => setScreen('dashboard')}/>
-      )}
+      <AnimatePresence mode="wait">
+        {screen === 'landing' && (
+          <motion.div key="landing" {...pageVariants}>
+            <Landing onShorten={handleShorten} setScreen={setScreen}/>
+          </motion.div>
+        )}
+        {screen === 'dashboard' && (
+          <motion.div key="dashboard" {...pageVariants}>
+            <Dashboard links={links} setLinks={setLinks} onView={handleView}/>
+          </motion.div>
+        )}
+        {screen === 'analytics' && selectedLink && (
+          <motion.div key="analytics" {...pageVariants}>
+            <Analytics link={selectedLink} onBack={() => setScreen('dashboard')}/>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </>
   );
 };

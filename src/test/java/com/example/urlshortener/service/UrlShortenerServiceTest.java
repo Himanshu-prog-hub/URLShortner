@@ -6,6 +6,7 @@ import com.example.urlshortener.exception.CodeAlreadyExistsException;
 import com.example.urlshortener.exception.UrlNotFoundException;
 import com.example.urlshortener.model.UrlMapping;
 import com.example.urlshortener.repository.UrlRepository;
+import com.example.urlshortener.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -25,11 +26,14 @@ class UrlShortenerServiceTest {
     @Mock
     private UrlRepository urlRepository;
 
+    @Mock
+    private UserRepository userRepository;
+
     private UrlShortenerServiceImpl service;
 
     @BeforeEach
     void setUp() {
-        service = new UrlShortenerServiceImpl(urlRepository, "http://localhost:8080", 6);
+        service = new UrlShortenerServiceImpl(urlRepository, userRepository, "http://localhost:8080", 6);
     }
 
     @Test
@@ -40,7 +44,8 @@ class UrlShortenerServiceTest {
         when(urlRepository.existsByShortCode(anyString())).thenReturn(false);
         when(urlRepository.save(any(UrlMapping.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        ShortenResponse response = service.shorten(request);
+        // Pass null username — no user lookup, owner will be null
+        ShortenResponse response = service.shorten(request, null);
 
         assertThat(response.getLongUrl()).isEqualTo("https://www.example.com/some/long/path");
         assertThat(response.getShortCode()).hasSize(6);
@@ -57,7 +62,7 @@ class UrlShortenerServiceTest {
 
         when(urlRepository.existsByShortCode("my-blog")).thenReturn(true);
 
-        assertThatThrownBy(() -> service.shorten(request))
+        assertThatThrownBy(() -> service.shorten(request, null))
                 .isInstanceOf(CodeAlreadyExistsException.class)
                 .hasMessageContaining("my-blog");
     }
@@ -74,10 +79,11 @@ class UrlShortenerServiceTest {
                 .clickCount(0)
                 .build();
 
+        // With null username, service calls findByLongUrl (not the per-owner variant)
         when(urlRepository.findByLongUrl("https://www.himanshumishra.site"))
                 .thenReturn(Optional.of(existing));
 
-        ShortenResponse response = service.shorten(request);
+        ShortenResponse response = service.shorten(request, null);
 
         assertThat(response.getShortCode()).isEqualTo("abc123");
         assertThat(response.getLongUrl()).isEqualTo("https://www.himanshumishra.site");
@@ -112,14 +118,25 @@ class UrlShortenerServiceTest {
 
     @Test
     void delete_shouldSucceed_whenCodeExists() {
+        UrlMapping existing = UrlMapping.builder()
+                .shortCode("abc123")
+                .longUrl("https://example.com")
+                .createdAt(LocalDateTime.now())
+                .clickCount(0)
+                .build();
+
+        when(urlRepository.findByShortCode("abc123")).thenReturn(Optional.of(existing));
         when(urlRepository.deleteByShortCode("abc123")).thenReturn(true);
-        assertThatCode(() -> service.delete("abc123")).doesNotThrowAnyException();
+
+        // Pass null username — ownership check skipped
+        assertThatCode(() -> service.delete("abc123", null)).doesNotThrowAnyException();
     }
 
     @Test
     void delete_shouldThrow_whenCodeNotFound() {
-        when(urlRepository.deleteByShortCode("xxxxxx")).thenReturn(false);
-        assertThatThrownBy(() -> service.delete("xxxxxx"))
+        when(urlRepository.findByShortCode("xxxxxx")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.delete("xxxxxx", null))
                 .isInstanceOf(UrlNotFoundException.class);
     }
 }

@@ -1,6 +1,7 @@
 package com.example.urlshortener.repository;
 
 import com.example.urlshortener.model.UrlMapping;
+import com.example.urlshortener.model.User;
 import org.springframework.stereotype.Repository;
 
 import java.util.ArrayList;
@@ -53,5 +54,21 @@ public class InMemoryUrlRepository implements UrlRepository {
     @Override
     public List<UrlMapping> findAll() {
         return new ArrayList<>(store.values());
+    }
+
+    @Override
+    public Optional<UrlMapping> findByLongUrlAndOwner(String longUrl, User owner) {
+        return store.values().stream()
+                .filter(m -> m.getLongUrl().equals(longUrl)
+                        && ((owner == null && m.getOwner() == null)
+                            || (owner != null && owner.equals(m.getOwner()))))
+                .findFirst();
+    }
+
+    @Override
+    public List<UrlMapping> findAllByOwner(User owner) {
+        return store.values().stream()
+                .filter(m -> owner == null ? m.getOwner() == null : owner.equals(m.getOwner()))
+                .collect(java.util.stream.Collectors.toList());
     }
 }

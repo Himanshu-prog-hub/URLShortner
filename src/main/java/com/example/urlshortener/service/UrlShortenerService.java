@@ -7,9 +7,19 @@ import com.example.urlshortener.dto.StatsResponse;
 import java.util.List;
 
 public interface UrlShortenerService {
-    ShortenResponse shorten(ShortenRequest request);
+
+    /** Shorten a URL, optionally associating it with the given username. */
+    ShortenResponse shorten(ShortenRequest request, String username);
+
+    /** Resolve a short code to the original URL and increment click count. Public — no auth. */
     String resolveAndTrack(String shortCode);
+
+    /** Get stats for a single code. */
     StatsResponse getStats(String shortCode);
-    void delete(String shortCode);
-    List<StatsResponse> getAllLinks();
+
+    /** Delete a portal. Ownership is enforced when username is non-null. */
+    void delete(String shortCode, String username);
+
+    /** List all portals owned by the given username. */
+    List<StatsResponse> getAllLinks(String username);
 }

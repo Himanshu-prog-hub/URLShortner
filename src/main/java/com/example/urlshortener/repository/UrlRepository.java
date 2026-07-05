@@ -1,6 +1,7 @@
 package com.example.urlshortener.repository;
 
 import com.example.urlshortener.model.UrlMapping;
+import com.example.urlshortener.model.User;
 
 import java.util.List;
 import java.util.Optional;
@@ -12,5 +13,7 @@ public interface UrlRepository {
     boolean deleteByShortCode(String shortCode);
     void incrementClickCount(String shortCode);
     Optional<UrlMapping> findByLongUrl(String longUrl);
+    Optional<UrlMapping> findByLongUrlAndOwner(String longUrl, User owner);
     List<UrlMapping> findAll();
+    List<UrlMapping> findAllByOwner(User owner);
 }

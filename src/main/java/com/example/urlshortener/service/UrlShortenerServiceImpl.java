@@ -6,12 +6,14 @@ import com.example.urlshortener.dto.StatsResponse;
 import com.example.urlshortener.exception.CodeAlreadyExistsException;
 import com.example.urlshortener.exception.UrlNotFoundException;
 import com.example.urlshortener.model.UrlMapping;
+import com.example.urlshortener.model.User;
 import com.example.urlshortener.repository.UrlRepository;
-
+import com.example.urlshortener.repository.UserRepository;
 import jakarta.transaction.Transactional;
-
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.net.URI;
 import java.time.LocalDateTime;
@@ -24,37 +26,41 @@ import java.util.stream.Collectors;
 public class UrlShortenerServiceImpl implements UrlShortenerService {
 
     private final UrlRepository urlRepository;
+    private final UserRepository userRepository;
     private final String baseUrl;
     private final int codeLength;
 
     public UrlShortenerServiceImpl(
             UrlRepository urlRepository,
+            UserRepository userRepository,
             @Value("${app.base-url}") String baseUrl,
             @Value("${app.short-code.length}") int codeLength) {
         this.urlRepository = urlRepository;
+        this.userRepository = userRepository;
         this.baseUrl = baseUrl;
         this.codeLength = codeLength;
     }
 
+    /* ── shorten ─────────────────────────────────────────── */
     @Transactional
     @Override
-    public ShortenResponse shorten(ShortenRequest request) {
+    public ShortenResponse shorten(ShortenRequest request, String username) {
         String normalizedLongUrl = normalizeLongUrl(request.getLongUrl());
+        User owner = resolveUser(username);
 
-        // If no custom code requested and URL was already shortened, return existing entry
+        // Dedup: if no custom code and same URL already exists for this owner, return it
         if (request.getCustomCode() == null || request.getCustomCode().isBlank()) {
-            Optional<UrlMapping> existing = urlRepository.findByLongUrl(normalizedLongUrl);
+            Optional<UrlMapping> existing = (owner != null)
+                    ? urlRepository.findByLongUrlAndOwner(normalizedLongUrl, owner)
+                    : urlRepository.findByLongUrl(normalizedLongUrl);
+
             if (existing.isPresent()) {
                 UrlMapping m = existing.get();
-                return ShortenResponse.builder()
-                        .shortCode(m.getShortCode())
-                        .shortUrl(baseUrl + "/" + m.getShortCode())
-                        .longUrl(m.getLongUrl())
-                        .createdAt(m.getCreatedAt())
-                        .build();
+                return toShortenResponse(m);
             }
         }
 
+        // Resolve or generate short code
         String shortCode;
         if (request.getCustomCode() != null && !request.getCustomCode().isBlank()) {
             if (urlRepository.existsByShortCode(request.getCustomCode())) {
@@ -70,18 +76,14 @@ public class UrlShortenerServiceImpl implements UrlShortenerService {
                 .longUrl(normalizedLongUrl)
                 .createdAt(LocalDateTime.now())
                 .clickCount(0)
+                .owner(owner)
                 .build();
 
         urlRepository.save(mapping);
-
-        return ShortenResponse.builder()
-                .shortCode(shortCode)
-                .shortUrl(baseUrl + "/" + shortCode)
-                .longUrl(normalizedLongUrl)
-                .createdAt(mapping.getCreatedAt())
-                .build();
+        return toShortenResponse(mapping);
     }
 
+    /* ── resolveAndTrack ────────────────────────────────── */
     @Transactional
     @Override
     public String resolveAndTrack(String shortCode) {
@@ -91,40 +93,75 @@ public class UrlShortenerServiceImpl implements UrlShortenerService {
         return mapping.getLongUrl();
     }
 
-    @Transactional
+    /* ── getStats ───────────────────────────────────────── */
     @Override
     public StatsResponse getStats(String shortCode) {
         UrlMapping mapping = urlRepository.findByShortCode(shortCode)
                 .orElseThrow(() -> new UrlNotFoundException(shortCode));
-        return StatsResponse.builder()
-                .shortCode(mapping.getShortCode())
-                .shortUrl(baseUrl + "/" + shortCode)
-                .longUrl(mapping.getLongUrl())
-                .clickCount(mapping.getClickCount())
-                .createdAt(mapping.getCreatedAt())
-                .build();
+        return toStatsResponse(mapping);
     }
 
+    /* ── delete ─────────────────────────────────────────── */
     @Transactional
     @Override
-    public void delete(String shortCode) {
+    public void delete(String shortCode, String username) {
+        UrlMapping mapping = urlRepository.findByShortCode(shortCode)
+                .orElseThrow(() -> new UrlNotFoundException(shortCode));
+
+        // Ownership check: only enforce when both caller and mapping have a user
+        if (username != null && mapping.getOwner() != null) {
+            User owner = resolveUser(username);
+            if (owner != null && !mapping.getOwner().getId().equals(owner.getId())) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                        "You do not own this portal");
+            }
+        }
+
         boolean deleted = urlRepository.deleteByShortCode(shortCode);
         if (!deleted) {
             throw new UrlNotFoundException(shortCode);
         }
     }
 
+    /* ── getAllLinks ─────────────────────────────────────── */
     @Override
-    public List<StatsResponse> getAllLinks() {
-        return urlRepository.findAll().stream()
-                .map(m -> StatsResponse.builder()
-                        .shortCode(m.getShortCode())
-                        .shortUrl(baseUrl + "/" + m.getShortCode())
-                        .longUrl(m.getLongUrl())
-                        .clickCount(m.getClickCount())
-                        .createdAt(m.getCreatedAt())
-                        .build())
+    public List<StatsResponse> getAllLinks(String username) {
+        User owner = resolveUser(username);
+
+        List<UrlMapping> mappings = (owner != null)
+                ? urlRepository.findAllByOwner(owner)
+                : urlRepository.findAll();
+
+        return mappings.stream()
+                .map(this::toStatsResponse)
                 .collect(Collectors.toList());
+    }
+
+    /* ── helpers ─────────────────────────────────────────── */
+
+    /** Look up User by username; returns null if username is null or not found. */
+    private User resolveUser(String username) {
+        if (username == null) return null;
+        return userRepository.findByUsername(username).orElse(null);
+    }
+
+    private ShortenResponse toShortenResponse(UrlMapping m) {
+        return ShortenResponse.builder()
+                .shortCode(m.getShortCode())
+                .shortUrl(baseUrl + "/" + m.getShortCode())
+                .longUrl(m.getLongUrl())
+                .createdAt(m.getCreatedAt())
+                .build();
+    }
+
+    private StatsResponse toStatsResponse(UrlMapping m) {
+        return StatsResponse.builder()
+                .shortCode(m.getShortCode())
+                .shortUrl(baseUrl + "/" + m.getShortCode())
+                .longUrl(m.getLongUrl())
+                .clickCount(m.getClickCount())
+                .createdAt(m.getCreatedAt())
+                .build();
     }
 
     private String generateUniqueCode() {
@@ -142,7 +179,7 @@ public class UrlShortenerServiceImpl implements UrlShortenerService {
         try {
             URI uri = new URI(trimmed).normalize();
             String scheme = uri.getScheme() == null ? null : uri.getScheme().toLowerCase();
-            String host = uri.getHost() == null ? null : uri.getHost().toLowerCase();
+            String host   = uri.getHost()   == null ? null : uri.getHost().toLowerCase();
 
             if (scheme == null || host == null) {
                 return trimTrailingSlash(trimmed);
@@ -170,12 +207,8 @@ public class UrlShortenerServiceImpl implements UrlShortenerService {
                 normalized.append(":").append(port);
             }
             normalized.append(path);
-            if (uri.getRawQuery() != null) {
-                normalized.append("?").append(uri.getRawQuery());
-            }
-            if (uri.getRawFragment() != null) {
-                normalized.append("#").append(uri.getRawFragment());
-            }
+            if (uri.getRawQuery()    != null) normalized.append("?").append(uri.getRawQuery());
+            if (uri.getRawFragment() != null) normalized.append("#").append(uri.getRawFragment());
             return normalized.toString();
         } catch (Exception ex) {
             return trimTrailingSlash(trimmed);
