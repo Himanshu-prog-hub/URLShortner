@@ -1,4 +1,4 @@
-package com.example.urlshortener.service;
+﻿package com.example.urlshortener.service;
 
 import com.example.urlshortener.dto.ShortenRequest;
 import com.example.urlshortener.dto.ShortenResponse;
@@ -126,13 +126,16 @@ public class UrlShortenerServiceImpl implements UrlShortenerService {
     /* ── getAllLinks ─────────────────────────────────────── */
     @Override
     public List<StatsResponse> getAllLinks(String username) {
+        if (username == null) {
+            // Anonymous — never leak other users' links to unauthenticated callers
+            return List.of();
+        }
         User owner = resolveUser(username);
-
-        List<UrlMapping> mappings = (owner != null)
-                ? urlRepository.findAllByOwner(owner)
-                : urlRepository.findAll();
-
-        return mappings.stream()
+        if (owner == null) {
+            // JWT was valid but user row is gone — return nothing, not everything
+            return List.of();
+        }
+        return urlRepository.findAllByOwner(owner).stream()
                 .map(this::toStatsResponse)
                 .collect(Collectors.toList());
     }

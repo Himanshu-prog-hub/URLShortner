@@ -10,7 +10,17 @@ target/
 *.env
 application-local.properties
 application-*.local.properties
-.claude/settings.local.json
+.claude/
+
+### Node (accidental root install — real frontend deps live in frontend/) ###
+node_modules/
+/package.json
+/package-lock.json
+
+### Personal study material / scratch files — not part of the project ###
+*.pdf
+/public/
+/plans/
 
 ### STS ###
 .apt_generated

@@ -1,5 +1,7 @@
 package com.example.urlshortener.security;
 
+import com.example.urlshortener.service.OAuth2UserServiceImpl;
+import com.example.urlshortener.service.OidcUserServiceImpl;
 import com.example.urlshortener.service.UserDetailsServiceImpl;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -29,11 +31,20 @@ public class SecurityConfig {
 
     private final UserDetailsServiceImpl userDetailsService;
     private final JwtAuthFilter jwtAuthFilter;
+    private final OAuth2UserServiceImpl oAuth2UserService;
+    private final OidcUserServiceImpl oidcUserService;
+    private final OAuth2SuccessHandler oAuth2SuccessHandler;
 
     public SecurityConfig(UserDetailsServiceImpl userDetailsService,
-                          JwtAuthFilter jwtAuthFilter) {
+                          JwtAuthFilter jwtAuthFilter,
+                          OAuth2UserServiceImpl oAuth2UserService,
+                          OidcUserServiceImpl oidcUserService,
+                          OAuth2SuccessHandler oAuth2SuccessHandler) {
         this.userDetailsService = userDetailsService;
         this.jwtAuthFilter = jwtAuthFilter;
+        this.oAuth2UserService = oAuth2UserService;
+        this.oidcUserService = oidcUserService;
+        this.oAuth2SuccessHandler = oAuth2SuccessHandler;
     }
 
     // BCryptPasswordEncoder: industry-standard adaptive password hashing.
@@ -95,10 +106,13 @@ public class SecurityConfig {
                 .anyRequest().authenticated()
             )
 
-            // 3. Stateless sessions — Spring Security must NEVER create an HTTP session.
-            // Every request carries its own JWT; there is no server-side session state.
+            // 3. Session policy — IF_REQUIRED lets Spring create a session ONLY for the
+            // OAuth2 handshake (storing the state parameter between the redirect to Google
+            // and the callback from Google). Regular API calls still use JWT and never
+            // touch a session. STATELESS breaks OAuth2 because the state parameter has
+            // nowhere to live between the two HTTP round-trips to Google.
             .sessionManagement(s ->
-                s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                s.sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
 
             // 4. Register our authentication provider
             .authenticationProvider(authenticationProvider())
@@ -106,7 +120,29 @@ public class SecurityConfig {
             // 5. Run our JWT filter BEFORE Spring's default form-login filter.
             // This ensures the token is validated and the SecurityContext is populated
             // before any authorisation decisions are made.
-            .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+            .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
+
+            // 6. Google login. Note there is no explicit permitAll() rule added
+            // above for /oauth2/authorization/** or /login/oauth2/code/** —
+            // none is needed. Those two paths are handled by dedicated OAuth2
+            // filters (OAuth2AuthorizationRequestRedirectFilter and
+            // OAuth2LoginAuthenticationFilter) that Spring Security inserts
+            // earlier in the filter chain than the authorizeHttpRequests
+            // check above, so they run — and redirect to Google, or process
+            // Google's callback — before the "everything else must be
+            // authenticated" rule ever gets a chance to reject the request.
+            .oauth2Login(oauth -> oauth
+                .userInfoEndpoint(u -> u
+                    // Plain OAuth2 flow (non-OIDC providers like GitHub)
+                    .userService(oAuth2UserService)
+                    // OIDC flow — used by Google when scope includes "openid".
+                    // Without this, Spring's default OidcUserService runs and
+                    // never saves the user to our DB, causing NoSuchElementException
+                    // in OAuth2SuccessHandler.
+                    .oidcUserService(oidcUserService)
+                )
+                .successHandler(oAuth2SuccessHandler)
+            );
 
         return http.build();
     }
